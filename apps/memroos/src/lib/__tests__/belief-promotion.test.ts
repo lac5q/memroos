@@ -1146,6 +1146,26 @@ describe("belief promotion pipeline", () => {
     expect(provenance?.evidence).toMatchObject({ reason: "capture_not_found" });
   });
 
+  it("resolveReview rejects invalid resolution values", () => {
+    const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
+    const queued = promoteCandidate(db, {
+      candidateId: f.candidateId,
+      tenantId: TENANT,
+      actor: { id: "operator-1", role: "operator" },
+      category: "pricing",
+    });
+    expect(queued.kind).toBe("queued_for_review");
+    if (queued.kind !== "queued_for_review") throw new Error("expected queue");
+    expect(() =>
+      resolveReview(db, {
+        queueId: queued.queueId,
+        tenantId: TENANT,
+        resolution: "maybe" as "approved",
+        operatorId: "operator-2",
+      })
+    ).toThrow(/invalid resolution/);
+  });
+
   it("resolveReview rejects unknown queue ids and already-resolved items", () => {
     const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
     const queued = promoteCandidate(db, {

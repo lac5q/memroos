@@ -1219,6 +1219,17 @@ describe("approveSyncProposalById and rejectSyncProposalById", () => {
     ).toThrow(SkillSyncError);
   });
 
+  it("rollbackToPriorVersion throws when sync_state row is missing", async () => {
+    const { rollbackToPriorVersion, SkillSyncError } = await import("../skill-sync");
+    expect(() =>
+      rollbackToPriorVersion(db, {
+        skill_name: "missing-sync-state",
+        source_harness: "claude",
+        operator: "alice",
+      })
+    ).toThrow(SkillSyncError);
+  });
+
   it("rollbackToPriorVersion restores registry hash without prior_raw_body payload", async () => {
     const { createImportProposal, approveImportProposal, rollbackToPriorVersion } =
       await import("../skill-sync");

@@ -23,7 +23,8 @@ import {
   fetchNangoCredentials,
   listNangoConnections,
 } from "@/lib/tool-auth/nango-client";
-import { callTool, initialize } from "../mcp-client";
+import { callRest, callTool, initialize } from "../mcp-client";
+import { fetchNotionPageText } from "../notion-fetch";
 import {
   CONNECTOR_CYCLE_LIMIT,
   CONNECTOR_INTERVAL_MS,
@@ -35,7 +36,9 @@ import {
 const mockListConnections = vi.mocked(listNangoConnections);
 const mockFetchCreds = vi.mocked(fetchNangoCredentials);
 const mockCallTool = vi.mocked(callTool);
+const mockCallRest = vi.mocked(callRest);
 const mockInitialize = vi.mocked(initialize);
+const mockFetchNotion = vi.mocked(fetchNotionPageText);
 
 function makeDb(): Database.Database {
   const db = new Database(":memory:");
@@ -159,6 +162,83 @@ describe("connector sync-job", () => {
     startFresh();
     expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), CONNECTOR_INTERVAL_MS);
     intervalSpy.mockRestore();
+    delete process.env.NANGO_SECRET_KEY;
+  });
+
+  it("marks cycle degraded when credential fetch fails for a connection", async () => {
+    mockListConnections.mockResolvedValue([
+      {
+        connectionId: "conn-linear",
+        providerKey: "linear",
+        providerConfigKey: "linear-mcp",
+      },
+    ] as Awaited<ReturnType<typeof listNangoConnections>>);
+    mockFetchCreds.mockRejectedValue(new Error("token refresh failed"));
+    const result = await runConnectorCycle(db);
+    expect(result.degraded).toBe(true);
+    expect(result.degradedProviders).toEqual(["linear"]);
+    expect(result.written).toBe(0);
+  });
+
+  it("skips connections whose provider has no sync manifest", async () => {
+    mockListConnections.mockResolvedValue([
+      {
+        connectionId: "conn-unknown",
+        providerKey: "unknown-provider",
+        providerConfigKey: "unknown",
+      },
+    ] as Awaited<ReturnType<typeof listNangoConnections>>);
+    const result = await runConnectorCycle(db);
+    expect(result).toMatchObject({ written: 0, degraded: false, degradedProviders: [] });
+    expect(mockFetchCreds).not.toHaveBeenCalled();
+  });
+
+  it("syncs notion pages via REST enrichment and tolerates enrichment failures", async () => {
+    mockListConnections.mockResolvedValue([
+      {
+        connectionId: "conn-notion",
+        providerKey: "notion",
+        providerConfigKey: "notion",
+      },
+    ] as Awaited<ReturnType<typeof listNangoConnections>>);
+    mockFetchCreds.mockResolvedValue({ accessToken: "notion-token" } as Awaited<
+      ReturnType<typeof fetchNangoCredentials>
+    >);
+    mockCallRest.mockResolvedValueOnce({
+      payload: {
+        results: [
+          {
+            id: "page-1",
+            url: "https://notion.so/page-1",
+            last_edited_time: "2026-07-01T00:00:00.000Z",
+            properties: { title: { title: [{ plain_text: "Runbook" }] } },
+          },
+        ],
+        has_more: false,
+      },
+    });
+    mockFetchNotion.mockRejectedValueOnce(new Error("notion blocks offline"));
+    const ok = await runConnectorCycle(db);
+    expect(ok.written).toBeGreaterThanOrEqual(1);
+    expect(mockCallRest).toHaveBeenCalled();
+    expect(mockInitialize).not.toHaveBeenCalled();
+  });
+
+  it("startConnectorJob interval callback swallows unhandled sync errors", async () => {
+    vi.resetModules();
+    process.env.NANGO_SECRET_KEY = "test-nango-key";
+    mockListConnections.mockRejectedValue(new Error("cycle blew up"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let captured: (() => void) | undefined;
+    vi.spyOn(global, "setInterval").mockImplementation((fn) => {
+      captured = fn as () => void;
+      return { unref: vi.fn() } as never;
+    });
+    const { startConnectorJob: startFresh } = await import("../sync-job");
+    startFresh();
+    await captured?.();
+    expect(errorSpy).toHaveBeenCalledWith("[connectors] sync cycle failed:", expect.any(Error));
+    errorSpy.mockRestore();
     delete process.env.NANGO_SECRET_KEY;
   });
 });

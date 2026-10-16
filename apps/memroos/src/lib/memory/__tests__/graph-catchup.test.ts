@@ -19,8 +19,10 @@ import {
   projectMemoryToGraph,
   readGraphCatchupCheckpoint,
   runGraphCatchup,
+  scrollQdrantPoints,
   writeGraphCatchupCheckpoint,
 } from "../graph-catchup";
+import * as graphCatchupModule from "../graph-catchup";
 import {
   runScheduledGraphCatchup,
   startGraphCatchupScheduler,
@@ -198,7 +200,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("dry-run projects without advancing the persisted checkpoint", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     testDb
       .prepare(
         `INSERT INTO messages (session_id, project, agent_id, role, content, timestamp)
@@ -229,7 +231,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("advances episodic checkpoint and does not reprocess on second run", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     testDb
       .prepare(
         `INSERT INTO messages (session_id, project, agent_id, role, content, timestamp)
@@ -273,7 +275,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("rate-limits Neo4j writes via sleep between projections", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     testDb
       .prepare(
         `INSERT INTO messages (session_id, project, agent_id, role, content, timestamp)
@@ -372,6 +374,55 @@ describe("graph-catchup incremental checkpointing", () => {
     expect(normalizeVectorMemoryPoint("not-an-object")).toBeNull();
   });
 
+  it("scrollQdrantPoints paginates with cursor and api-key header", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.offset).toBe("page-1");
+      expect((init?.headers as Record<string, string>)["api-key"]).toBe("qdrant-key");
+      return Response.json({
+        result: {
+          points: [{ id: "p1", payload: { data: "hello" } }],
+          next_page_offset: null,
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const page = await scrollQdrantPoints("page-1", 10, {
+      url: "http://qdrant.local/",
+      apiKey: "qdrant-key",
+      collection: "mem_test",
+    });
+    expect(page.items).toHaveLength(1);
+    expect(page.nextCursor).toBeNull();
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/collections/mem_test/points/scroll");
+  });
+
+  it("projectMemoryFact logs entity projection failures without failing the fact merge", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const queryFn = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("entity merge failed"));
+    const result = await projectMemoryFact(
+      {
+        id: "vector:ent-1",
+        content: "MemRoOS ships graph catchup with entity edges.",
+        source: "vector",
+        agentId: "luis",
+        createdAt: "2026-07-17T10:00:00.000Z",
+      },
+      { queryFn, projectEntities: true }
+    );
+    expect(result).toBe("projected");
+    expect(queryFn).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[graph-catchup] entity projection failed",
+      "vector:ent-1",
+      "entity merge failed"
+    );
+    warnSpy.mockRestore();
+  });
+
   it("scheduler heartbeats cron_health and skips when Neo4j missing", async () => {
     delete process.env.NEO4J_PASSWORD;
     const result = await runScheduledGraphCatchup({
@@ -385,7 +436,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("runScheduledGraphCatchup skips when cron job is paused", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     testDb
       .prepare(`UPDATE cron_health_jobs SET status = ? WHERE id = ?`)
       .run("paused", GRAPH_CATCHUP_CRON_ID);
@@ -393,6 +444,52 @@ describe("graph-catchup incremental checkpointing", () => {
       now: new Date("2026-07-17T12:00:00.000Z"),
     });
     expect(result).toEqual({ status: "skipped", reason: "cron_paused_or_stopped" });
+  });
+
+  it("runScheduledGraphCatchup records partial and failed cron health metadata", async () => {
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
+    const checkpoint = readGraphCatchupCheckpoint(testDb);
+    const base = {
+      considered: 1,
+      projected: 1,
+      skipped: 0,
+      errors: 0,
+      dryRun: false,
+      neo4jConfigured: true,
+      checkpointBefore: checkpoint,
+      checkpointAfter: checkpoint,
+      sources: {
+        episodic: { considered: 1, projected: 1, errors: 0 },
+        vector: { considered: 0, projected: 0, errors: 0 },
+      },
+    };
+    const runSpy = vi
+      .spyOn(graphCatchupModule, "runGraphCatchup")
+      .mockResolvedValueOnce({
+        ...base,
+        status: "partial",
+        errors: 2,
+        reason: "partial_errors",
+      })
+      .mockResolvedValueOnce({
+        ...base,
+        status: "failed",
+        reason: "neo4j_write_failed",
+      });
+    const partial = await runScheduledGraphCatchup({
+      now: new Date("2026-07-17T12:00:00.000Z"),
+    });
+    expect(partial.status).toBe("partial");
+    let job = listCronHealthJobs(testDb).find((j) => j.id === GRAPH_CATCHUP_CRON_ID);
+    expect(job?.warning).toMatch(/partial_errors/);
+
+    const failed = await runScheduledGraphCatchup({
+      now: new Date("2026-07-17T12:05:00.000Z"),
+    });
+    expect(failed.status).toBe("failed");
+    job = listCronHealthJobs(testDb).find((j) => j.id === GRAPH_CATCHUP_CRON_ID);
+    expect(job?.warning).toMatch(/neo4j_write_failed/);
+    runSpy.mockRestore();
   });
 
   it("startGraphCatchupScheduler registers interval only once", () => {
@@ -421,7 +518,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("oneshot pages vector memories across fetchVectorPage cursors", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     process.env.QDRANT_URL = "http://qdrant.test";
     const pages: Array<{
       items: Array<Record<string, unknown>>;
@@ -475,7 +572,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("uses legacy fetchVectorMemories when Qdrant scroll is disabled", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     delete process.env.QDRANT_URL;
     const seen: string[] = [];
     const summary = await runGraphCatchup(testDb, {
@@ -508,7 +605,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("marks partial status and advances past a failed episodic projection", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     testDb
       .prepare(
         `INSERT INTO messages (session_id, project, agent_id, role, content, timestamp)
@@ -541,7 +638,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("continues oneshot vector projection after a single item failure", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     process.env.QDRANT_URL = "http://qdrant.test";
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     let calls = 0;
@@ -586,7 +683,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("stops incremental vector projection after the first failure", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     process.env.QDRANT_URL = "http://qdrant.test";
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     writeGraphCatchupCheckpoint(testDb, {
@@ -644,7 +741,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("uses legacy vector path and stops on incremental project failure", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     delete process.env.QDRANT_URL;
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     let calls = 0;
@@ -681,7 +778,7 @@ describe("graph-catchup incremental checkpointing", () => {
 
   // MiniMax-M3 worker draft (Beastmode 20260718T151444Z); director-reviewed.
   it("increments summary.skipped when mapVectorMemoryToProjection returns null", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     process.env.QDRANT_URL = "http://qdrant.test";
     const seen: string[] = [];
     const summary = await runGraphCatchup(testDb, {
@@ -721,7 +818,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("honors maxPoints early-break in oneshot vector loop", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     process.env.QDRANT_URL = "http://qdrant.test";
     const seen: string[] = [];
     const summary = await runGraphCatchup(testDb, {
@@ -770,7 +867,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("returns failed when every episodic projection errors and none succeed", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     testDb
       .prepare(
         `INSERT INTO messages (session_id, project, agent_id, role, content, timestamp)
@@ -792,7 +889,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("skips vector rows at or before the incremental cursor", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     process.env.QDRANT_URL = "http://qdrant.test";
     writeGraphCatchupCheckpoint(testDb, {
       id: "default",
@@ -838,7 +935,7 @@ describe("graph-catchup incremental checkpointing", () => {
   });
 
   it("skips empty episodic content and pages oneshot across batches", async () => {
-    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     // Insert empty + two real messages; batchSize=1 forces multi-loop oneshot paging.
     testDb
       .prepare(
@@ -875,5 +972,39 @@ describe("graph-catchup incremental checkpointing", () => {
     expect(summary.projected).toBe(2);
     expect(seen).toEqual(["episodic:2", "episodic:3"]);
     expect(readGraphCatchupCheckpoint(testDb).episodicLastId).toBe(3);
+  });
+
+  it("runGraphCatchup uses Qdrant scroll when QDRANT_URL is configured", async () => {
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
+    process.env.QDRANT_URL = "http://qdrant.test";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          result: {
+            points: [
+              {
+                id: "q1",
+                payload: {
+                  data: "Qdrant scroll path",
+                  user_id: "luis",
+                  created_at: "2026-07-17T10:00:00.000Z",
+                },
+              },
+            ],
+            next_page_offset: null,
+          },
+        })
+      )
+    );
+    const summary = await runGraphCatchup(testDb, {
+      skipEpisodic: true,
+      now: new Date("2026-07-17T12:00:00.000Z"),
+      projectFact: async () => undefined,
+      sleep: async () => undefined,
+      log: () => undefined,
+    });
+    expect(summary.projected).toBe(1);
+    expect(summary.pages).toBe(1);
   });
 });

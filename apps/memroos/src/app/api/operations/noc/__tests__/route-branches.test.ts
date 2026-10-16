@@ -40,6 +40,33 @@ describe("GET /api/operations/noc branch coverage", () => {
     }
   });
 
+  it("returns null operator load status when latest.json is malformed", async () => {
+    fs.mkdirSync(OPERATOR_LOAD_DIR, { recursive: true });
+    if (fs.existsSync(OPERATOR_LOAD_FILE)) {
+      fs.renameSync(OPERATOR_LOAD_FILE, OPERATOR_LOAD_BACKUP);
+    }
+    fs.writeFileSync(OPERATOR_LOAD_FILE, "{ not valid json", "utf8");
+
+    const { GET } = await loadRoute();
+    const body = await (await GET(new Request("http://localhost/api/operations/noc?window=24h&workspace=all"))).json();
+    expect(body.operatorLoadStatus?.status).toBe("missing");
+    expect(body.panels.operatorLoad.status).toBe("degraded");
+  });
+
+  it("labels agent activity window_empty when history exists outside the window", async () => {
+    const { GET, getDb } = await loadRoute();
+    const db = getDb();
+    const oldTimestamp = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("old-session", "operator", "codex", "assistant", "stale", oldTimestamp, "internal", "indexable");
+
+    const body = await (await GET(new Request("http://localhost/api/operations/noc?window=24h&workspace=all"))).json();
+    expect(body.agentActivity.sourceState).toBe("window_empty");
+    expect(body.agentActivity.agents).toEqual([]);
+  });
+
   it("surfaces operator load status from reports/operator-load/latest.json", async () => {
     fs.mkdirSync(OPERATOR_LOAD_DIR, { recursive: true });
     if (fs.existsSync(OPERATOR_LOAD_FILE)) {

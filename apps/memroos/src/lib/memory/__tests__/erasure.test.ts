@@ -493,6 +493,26 @@ describe("coordinateErasure idempotency and scope", () => {
     }
   });
 
+  it("records adapter failures as incomplete erasure without false-complete", async () => {
+    registerErasureStoreAdapter({
+      storeId: "vector",
+      async erase() {
+        throw new Error("vector purge exploded");
+      },
+    });
+    const identity = buildCanonicalIdentity("adapter fail", "message", "ingress", "vector", {
+      tenantId: "tenant1",
+    });
+    const report = await coordinateErasure(db, identity, {
+      tenantId: "tenant1",
+      actorId: "actor1",
+      scope: { tenantId: "tenant1" },
+    });
+    expect(report.status).toBe("failed");
+    const vector = report.storeOutcomes.find((o) => o.storeId === "vector");
+    expect(vector?.status).toBe("failed");
+  });
+
   it("traverseIndirectDerivatives includes snapshot rows from embedding provenance", () => {
     db.exec(`
       CREATE TABLE memory_embedding_provenance (
