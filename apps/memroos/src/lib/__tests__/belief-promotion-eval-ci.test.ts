@@ -123,6 +123,17 @@ describe("BELIEF-05 promotion eval CI canary", () => {
     fs.unlinkSync(customPath);
   });
 
+  it("runBeliefPromotionEvalSuite captures handler exceptions as failed cases", async () => {
+    db = new Database(":memory:");
+    initSchema(db);
+    db.close();
+    db = new Database(":memory:");
+
+    const run = await runBeliefPromotionEvalSuite({ mode: "gold", db });
+    expect(run.pass).toBe(false);
+    expect(run.cases.some((c) => c.pass === false && c.reason && c.reason.length > 0)).toBe(true);
+  });
+
   it("runBeliefPromotionEvalSuite honors a custom clock for startedAt", async () => {
     db = new Database(":memory:");
     initSchema(db);

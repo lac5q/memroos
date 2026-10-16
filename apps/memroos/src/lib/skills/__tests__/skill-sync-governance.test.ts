@@ -1121,6 +1121,39 @@ describe("pin lookup helpers and agent-scoped rollback", () => {
     ).toThrow(SyncGovernanceError);
   });
 
+  it("sanitize helpers reject non-string harness, skill, actor, version, and hash inputs", async () => {
+    const { detectSkillChange, createOrUpdateAgentVersionPin, SyncGovernanceError } =
+      await importSyncModule();
+    expect(() =>
+      detectSkillChange(db, {
+        source_harness: 9 as unknown as string,
+        skill_name: "x",
+        detected_content_hash: "0".repeat(64),
+        proposed_by: "scanner",
+      })
+    ).toThrow(SyncGovernanceError);
+    expect(() =>
+      detectSkillChange(db, {
+        source_harness: "claude",
+        skill_name: null as unknown as string,
+        detected_content_hash: "0".repeat(64),
+        proposed_by: "scanner",
+      })
+    ).toThrow(SyncGovernanceError);
+    insertAgent("sanitize-agent", "Sanitize Agent");
+    const skillId = insertSkillRow({ name: "sanitize-skill", dispatch_status: "enabled" });
+    expect(() =>
+      createOrUpdateAgentVersionPin(db, {
+        agent_id: "sanitize-agent",
+        skill_name: "sanitize-skill",
+        skill_id: skillId,
+        current_version: null as unknown as string,
+        current_content_hash: "0".repeat(64),
+        actor: "alice",
+      })
+    ).toThrow(SyncGovernanceError);
+  });
+
   it("detectSkillChange rejects empty harness, skill name, actor, and malformed hashes", async () => {
     const { detectSkillChange, SyncGovernanceError } = await importSyncModule();
     expect(() =>
@@ -1155,6 +1188,136 @@ describe("pin lookup helpers and agent-scoped rollback", () => {
         proposed_by: " ",
       })
     ).toThrow(SyncGovernanceError);
+  });
+
+  it("rollbackAgentVersionPin rejects invalid pin_id values", async () => {
+    const { rollbackAgentVersionPin, SyncGovernanceError } = await importSyncModule();
+    expect(() => rollbackAgentVersionPin(db, { pin_id: 0, operator: "alice" })).toThrow(
+      SyncGovernanceError
+    );
+    expect(() => rollbackAgentVersionPin(db, { pin_id: -3, operator: "alice" })).toThrow(
+      /positive integer/
+    );
+  });
+
+  it("rollbackAgentVersionPinByAgent rejects incomplete prior registry rows", async () => {
+    const {
+      createOrUpdateAgentVersionPin,
+      rollbackAgentVersionPinByAgent,
+      SyncGovernanceError,
+    } = await importSyncModule();
+    insertAgent("incomplete-agent", "Incomplete Agent");
+    const priorId = insertSkillRow({
+      name: "incomplete-prior",
+      dispatch_status: "incomplete",
+      completeness_pct: 100,
+      content_hash: "1".repeat(64),
+    });
+    const currentId = insertSkillRow({
+      name: "incomplete-current",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      content_hash: "2".repeat(64),
+    });
+    createOrUpdateAgentVersionPin(db, {
+      agent_id: "incomplete-agent",
+      skill_name: "incomplete-skill",
+      skill_id: currentId,
+      current_version: "2.0.0",
+      current_content_hash: "2".repeat(64),
+      actor: "alice",
+    });
+    db.prepare(
+      `UPDATE skill_version_pins
+          SET prior_version = ?, prior_content_hash = ?, prior_skill_id = ?
+        WHERE agent_id = ? AND skill_name = ?`
+    ).run("1.0.0", "1".repeat(64), priorId, "incomplete-agent", "incomplete-skill");
+    expect(() =>
+      rollbackAgentVersionPinByAgent(db, {
+        agent_id: "incomplete-agent",
+        skill_name: "incomplete-skill",
+        operator: "alice",
+      })
+    ).toThrow(SyncGovernanceError);
+  });
+
+  it("rollbackAgentVersionPinByAgent rejects prior rows with incomplete completeness_pct", async () => {
+    const { createOrUpdateAgentVersionPin, rollbackAgentVersionPinByAgent } = await importSyncModule();
+    insertAgent("pct-agent", "Pct Agent");
+    const priorId = insertSkillRow({
+      name: "pct-prior",
+      dispatch_status: "enabled",
+      completeness_pct: 80,
+      content_hash: "1".repeat(64),
+    });
+    const currentId = insertSkillRow({
+      name: "pct-current",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      content_hash: "2".repeat(64),
+    });
+    createOrUpdateAgentVersionPin(db, {
+      agent_id: "pct-agent",
+      skill_name: "pct-skill",
+      skill_id: currentId,
+      current_version: "2.0.0",
+      current_content_hash: "2".repeat(64),
+      actor: "alice",
+    });
+    db.prepare(
+      `UPDATE skill_version_pins
+          SET prior_version = ?, prior_content_hash = ?, prior_skill_id = ?
+        WHERE agent_id = ? AND skill_name = ?`
+    ).run("1.0.0", "1".repeat(64), priorId, "pct-agent", "pct-skill");
+    expect(() =>
+      rollbackAgentVersionPinByAgent(db, {
+        agent_id: "pct-agent",
+        skill_name: "pct-skill",
+        operator: "alice",
+      })
+    ).toThrow(/completeness_pct=80/);
+  });
+
+  it("rollbackAgentVersionPinByAgent fails when prior registry hash does not match pin", async () => {
+    const {
+      createOrUpdateAgentVersionPin,
+      rollbackAgentVersionPinByAgent,
+      SyncGovernanceError,
+    } = await importSyncModule();
+    insertAgent("tamper-agent", "Tamper Agent");
+    const priorId = insertSkillRow({
+      name: "tamper-prior",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      content_hash: "1".repeat(64),
+    });
+    const currentId = insertSkillRow({
+      name: "tamper-current",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      content_hash: "2".repeat(64),
+    });
+    createOrUpdateAgentVersionPin(db, {
+      agent_id: "tamper-agent",
+      skill_name: "tamper-skill",
+      skill_id: currentId,
+      current_version: "2.0.0",
+      current_content_hash: "2".repeat(64),
+      actor: "alice",
+    });
+    db.prepare(
+      `UPDATE skill_version_pins
+          SET prior_version = ?, prior_content_hash = ?, prior_skill_id = ?
+        WHERE agent_id = ? AND skill_name = ?`
+    ).run("1.0.0", "f".repeat(64), priorId, "tamper-agent", "tamper-skill");
+    expect(() =>
+      rollbackAgentVersionPinByAgent(db, {
+        agent_id: "tamper-agent",
+        skill_name: "tamper-skill",
+        operator: "alice",
+        reason: "hash mismatch",
+      })
+    ).toThrow(/tampering suspected/);
   });
 
   it("approveImportProposal refuses unknown proposals and double approval", async () => {

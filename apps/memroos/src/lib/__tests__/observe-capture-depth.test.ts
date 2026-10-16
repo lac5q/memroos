@@ -17,6 +17,11 @@ import {
 import { readVaultArtifact } from "@/lib/vault/writer";
 
 describe("observe capture depth policy", () => {
+  it("detects transcript dump patterns", () => {
+    expect(looksLikeTranscriptDump("user: hello\nassistant: hi\n".repeat(30))).toBe(true);
+    expect(looksLikeTranscriptDump("short note")).toBe(false);
+  });
+
   it("defaults to relevant and accepts env override", () => {
     expect(resolveCaptureDepth(undefined, undefined)).toBe("relevant");
     expect(resolveCaptureDepth("summary")).toBe("summary");

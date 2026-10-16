@@ -259,6 +259,90 @@ describe("runtime health route", () => {
     expect(knowledge.detail).toContain("still running");
   });
 
+  it("marks mem0 down when the health endpoint returns a non-OK HTTP status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("upstream error", { status: 503 }))
+    );
+    const { GET } = await loadRoute();
+
+    const response = await GET();
+    const body = await response.json();
+    const mem0 = body.services.find((service: { service: string }) => service.service === "mem0");
+
+    expect(mem0.status).toBe("down");
+    expect(mem0.detail).toContain("HTTP 503");
+  });
+
+  it("reports RTK as up when the rtk binary responds to --version", async () => {
+    vi.mocked(execFile).mockImplementation((command, args, options, callback) => {
+      const done = typeof options === "function" ? options : callback;
+      if (!done) throw new Error("missing callback");
+      if (command === "rtk" && Array.isArray(args) && args.includes("--version")) {
+        done(null, "rtk 0.1.0", "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      if (Array.isArray(args) && args.includes("--json")) {
+        done(null, JSON.stringify({ ok: true, pendingEmbeddings: 0, failures: [], warnings: [] }), "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      done(null, "", "");
+      return {} as ReturnType<typeof execFile>;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          memory_runtime: { status: "available" },
+          queue: { queued: 0 },
+        })
+      )
+    );
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const rtk = body.services.find((service: { service: string }) => service.service === "RTK");
+    expect(rtk.status).toBe("up");
+  });
+
+  it("includes knowledge indexing warnings in the health detail", async () => {
+    vi.mocked(execFile).mockImplementation((_command, args, options, callback) => {
+      const done = typeof options === "function" ? options : callback;
+      if (!done) throw new Error("missing callback");
+      if (Array.isArray(args) && args.includes("--json")) {
+        done(
+          null,
+          JSON.stringify({
+            ok: false,
+            pendingEmbeddings: 2,
+            failures: [],
+            warnings: ["emails: stale embedding batch"],
+          }),
+          ""
+        );
+        return {} as ReturnType<typeof execFile>;
+      }
+      done(null, "", "");
+      return {} as ReturnType<typeof execFile>;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          memory_runtime: { status: "available" },
+          queue: { queued: 0 },
+        })
+      )
+    );
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const knowledge = body.services.find((service: { service: string }) => service.service === "Knowledge Index");
+    expect(knowledge.detail).toContain("stale embedding batch");
+  });
+
   it("includes graph memory status in app health", async () => {
     vi.stubGlobal(
       "fetch",

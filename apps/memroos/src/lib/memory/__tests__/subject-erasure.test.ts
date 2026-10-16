@@ -59,6 +59,51 @@ afterEach(() => {
 });
 
 describe("subject erasure planning and execution", () => {
+  it("matches retention records via externalId subject aliases", () => {
+    const database = freshDb();
+    const messageId = database
+      .prepare(
+        `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+         VALUES(?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        "sess-ext",
+        "alpha",
+        "agent",
+        "user",
+        "external subject payload",
+        "2026-01-01T00:00:00.000Z",
+        "internal",
+        "indexable"
+      ).lastInsertRowid as number;
+    registerRetentionRecord(database, {
+      recordType: "message",
+      recordId: String(messageId),
+      ontologyType: "memory.contact_event",
+      securityLabel: { visibility: "internal" },
+      purpose: "recall",
+      scope: {
+        tenantId: "default-tenant",
+        purpose: "recall",
+        project: "alpha",
+        externalId: "crm-contact-42",
+      },
+      contentHash: `hash-ext-${messageId}`,
+      actorId: "operator",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      now: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    const result = createSubjectErasurePlan(database, {
+      subject: { externalId: "crm-contact-42" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+      now: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.matchedRecords).toHaveLength(1);
+    expect(result.plan?.matchedRecords[0]?.recordId).toBe(String(messageId));
+  });
+
   it("VAL-MEM-019: resolves subject records and derivative coverage without raw payload", () => {
     const database = freshDb();
     const messageId = seedMessage(database, "SECRET_PAYLOAD_FOR_ALICE", "subject-alpha");

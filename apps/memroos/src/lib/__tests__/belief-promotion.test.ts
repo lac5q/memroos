@@ -1146,6 +1146,48 @@ describe("belief promotion pipeline", () => {
     expect(provenance?.evidence).toMatchObject({ reason: "capture_not_found" });
   });
 
+  it("provenance_check_denies_capture_without_raw_artifact", () => {
+    const f = insertFixture(db, { category: "operational" });
+    db.prepare(`UPDATE agent_session_captures SET raw_artifact_id = NULL WHERE id = ?`).run(
+      f.captureId
+    );
+    const provenance = evaluatePromotionChecks(db, TENANT, f.candidateId).find(
+      (c) => c.name === "provenance"
+    );
+    expect(provenance?.pass).toBe(false);
+    expect(provenance?.evidence).toMatchObject({ reason: "no_raw_artifact" });
+  });
+
+  it("provenance_check_denies_missing_capture_hash", () => {
+    const f = insertFixture(db, { category: "operational" });
+    db.prepare(`UPDATE agent_session_captures SET capture_hash = '' WHERE id = ?`).run(f.captureId);
+    const provenance = evaluatePromotionChecks(db, TENANT, f.candidateId).find(
+      (c) => c.name === "provenance"
+    );
+    expect(provenance?.pass).toBe(false);
+    expect(provenance?.evidence).toMatchObject({ reason: "capture_hash_missing" });
+  });
+
+  it("resolveReview rejects invalid resolution values", () => {
+    const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
+    const queued = promoteCandidate(db, {
+      candidateId: f.candidateId,
+      tenantId: TENANT,
+      actor: { id: "operator-1", role: "operator" },
+      category: "pricing",
+    });
+    expect(queued.kind).toBe("queued_for_review");
+    if (queued.kind !== "queued_for_review") throw new Error("expected queue");
+    expect(() =>
+      resolveReview(db, {
+        queueId: queued.queueId,
+        tenantId: TENANT,
+        resolution: "maybe" as "approved",
+        operatorId: "operator-2",
+      })
+    ).toThrow(/invalid resolution/);
+  });
+
   it("resolveReview rejects unknown queue ids and already-resolved items", () => {
     const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
     const queued = promoteCandidate(db, {

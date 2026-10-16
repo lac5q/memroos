@@ -297,6 +297,33 @@ describe("Erasure helpers and authorization", () => {
     ).rejects.toBeInstanceOf(ErasureAuthorizationError);
   });
 
+  it("ErasureAuthorizationError exposes typed codes for scope failures", async () => {
+    const db = new Database(":memory:");
+    const identity = buildCanonicalIdentity("x", "t", "ingress", "vector", { tenantId: "t1" });
+    try {
+      await coordinateErasure(db, identity, { tenantId: "t1", actorId: "a", scope: {} });
+      throw new Error("expected missing_scope");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ErasureAuthorizationError);
+      expect((error as ErasureAuthorizationError).code).toBe("missing_scope");
+      expect((error as ErasureAuthorizationError).name).toBe("ErasureAuthorizationError");
+    }
+    try {
+      await coordinateErasure(db, identity, {
+        tenantId: "t1",
+        actorId: "a",
+        scope: { tenantId: "   " },
+      });
+      throw new Error("expected missing_tenant");
+    } catch (error) {
+      expect((error as ErasureAuthorizationError).code).toBe("missing_tenant");
+    }
+  });
+
+  it("deriveErasureId returns the documented erasure_<sha256> format", () => {
+    expect(deriveErasureId("tenant-z", "canon-9")).toMatch(/^erasure_[a-f0-9]{64}$/);
+  });
+
   it("throws when canonical identity tenant disagrees with scope tenant", async () => {
     const db = new Database(":memory:");
     const identity = buildCanonicalIdentity("x", "t", "ingress", "vector", { tenantId: "tenant-a" });
@@ -353,6 +380,24 @@ describe("traverseIndirectDerivatives extended graph walks", () => {
     const indirect = traverseIndirectDerivatives(db, identity);
     expect(indirect.some((d) => d.storeId === "vault")).toBe(true);
     expect(indirect.some((d) => d.provenance === "erasure_report_snapshot")).toBe(true);
+  });
+
+  it("ignores non-object entries inside prior erasure report snapshots", () => {
+    const identity = buildCanonicalIdentity("array skip", "vault", "ingress", "vault");
+    db.prepare(
+      `INSERT INTO memory_erasure_reports (id, canonical_id, store_outcomes_json)
+       VALUES (?, ?, ?)`
+    ).run(
+      "er-array",
+      identity.id,
+      JSON.stringify([
+        null,
+        "bad",
+        { storeId: "platform", status: "tombstoned", sourceHash: identity.canonicalHash },
+      ])
+    );
+    const indirect = traverseIndirectDerivatives(db, identity);
+    expect(indirect.some((d) => d.storeId === "platform")).toBe(true);
   });
 
   it("skips malformed prior erasure report JSON", () => {
@@ -471,6 +516,46 @@ describe("coordinateErasure idempotency and scope", () => {
       .get("memory.erasure.completed") as { c: number };
     expect(audits.c).toBe(1);
     bare.close();
+  });
+
+  it("marks overall status incomplete when a linked store adapter is unavailable", async () => {
+    const identity = buildCanonicalIdentity("graph only", "graph", "ingress", "graph", {
+      tenantId: "tenant1",
+    });
+    const prev = process.env.NEO4J_PASSWORD;
+    delete process.env.NEO4J_PASSWORD;
+    try {
+      const report = await coordinateErasure(db, identity, {
+        tenantId: "tenant1",
+        actorId: "actor1",
+        scope: { tenantId: "tenant1" },
+      });
+      expect(report.status).toBe("incomplete");
+      expect(report.storeOutcomes.find((o) => o.storeId === "graph")?.status).toBe("unavailable");
+    } finally {
+      if (prev === undefined) delete process.env.NEO4J_PASSWORD;
+      else process.env.NEO4J_PASSWORD = prev;
+    }
+  });
+
+  it("records adapter failures as incomplete erasure without false-complete", async () => {
+    registerErasureStoreAdapter({
+      storeId: "vector",
+      async erase() {
+        throw new Error("vector purge exploded");
+      },
+    });
+    const identity = buildCanonicalIdentity("adapter fail", "message", "ingress", "vector", {
+      tenantId: "tenant1",
+    });
+    const report = await coordinateErasure(db, identity, {
+      tenantId: "tenant1",
+      actorId: "actor1",
+      scope: { tenantId: "tenant1" },
+    });
+    expect(report.status).toBe("failed");
+    const vector = report.storeOutcomes.find((o) => o.storeId === "vector");
+    expect(vector?.status).toBe("failed");
   });
 
   it("traverseIndirectDerivatives includes snapshot rows from embedding provenance", () => {

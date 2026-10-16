@@ -76,6 +76,26 @@ describe("dsar-export (ENTOPS-08)", () => {
     expect(paths).toEqual(["shared/notes.md"]);
   });
 
+  it("skips vault paths that escape the tenant root", () => {
+    seedKnowledgeWrite(db, {
+      tenantId: "default-tenant",
+      userId: "user-escape",
+      path: "../outside.md",
+    });
+    const vaultRoot = path.join(tmpRoot, "knowledge-escape");
+    fs.mkdirSync(path.join(vaultRoot, "tenants", "default-tenant"), { recursive: true });
+    const result = exportDsarPackage({
+      tenantId: "default-tenant",
+      userId: "user-escape",
+      outDir: path.join(tmpRoot, "out-traversal"),
+      vaultRoot,
+      db,
+      now: new Date("2026-07-16T21:00:00.000Z"),
+    });
+    expect(result.fileCount).toBe(0);
+    expect(result.vaultPaths).toEqual([]);
+  });
+
   it("exportDsarPackage archives vault files + audit NDJSON", () => {
     const vaultRoot = path.join(tmpRoot, "knowledge");
     const tenantVault = path.join(vaultRoot, "tenants", "default-tenant");
