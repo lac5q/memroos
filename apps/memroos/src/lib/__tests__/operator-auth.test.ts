@@ -9,14 +9,14 @@ describe("authorizeRegistryWrite", () => {
 
   it("allows loopback registry writes without an operator key", () => {
     expect(authorizeRegistryWrite(new Request("http://localhost/api/agents/register"))).toBe(true);
-    expect(authorizeRegistryWrite(new Request("http://inkbox.test.local/api/agents/register"))).toBe(true);
+    expect(authorizeRegistryWrite(new Request("http://127.0.0.1/api/agents/register"))).toBe(true); // pragma: allowlist secret
   });
 
   it("allows loopback dashboard calls even when an operator key is configured", () => {
     process.env.MEMROOS_OPERATOR_API_KEY = "operator-secret";
 
     expect(authorizeRegistryWrite(new Request("http://localhost/api/memory/health"))).toBe(true);
-    expect(authorizeRegistryWrite(new Request("http://inkbox.test.local/api/orchestration/hil"))).toBe(true);
+    expect(authorizeRegistryWrite(new Request("http://127.0.0.1/api/orchestration/hil"))).toBe(true); // pragma: allowlist secret
   });
 
   it("does not treat a public forwarded host as local loopback", () => {
@@ -34,7 +34,7 @@ describe("authorizeRegistryWrite", () => {
   it("parses bracketed IPv6 host headers for loopback detection", () => {
     expect(
       authorizeRegistryWrite(
-        new Request("http://inkbox.test.local/api/agents/register", {
+        new Request("http://127.0.0.1/api/agents/register", { // pragma: allowlist secret
           headers: { host: "[::1]:3000" },
         })
       )

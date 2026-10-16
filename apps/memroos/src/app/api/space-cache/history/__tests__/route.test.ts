@@ -23,7 +23,10 @@ describe("GET /api/space-cache/history", () => {
   let spaceId = "";
 
   beforeEach(() => {
-    spaceId = createSpace(testDb, { tenantId: "default-tenant", name: `cache-h-${Date.now()}` }).id;
+    spaceId = createSpace(testDb, {
+      tenantId: "default-tenant",
+      name: `cache-h-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    }).id;
     invalidateSpace(testDb, { spaceId, actorId: "agent-1", reason: "test" });
   });
 
