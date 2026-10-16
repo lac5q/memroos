@@ -124,4 +124,35 @@ describe("POST /api/library/qmd-update", () => {
       true
     );
   });
+
+  it("streams stderr and failed when qmd exits non-zero", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      killed: boolean;
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.pid = 9001;
+    child.killed = false;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = vi.fn();
+
+    vi.mocked(spawn).mockImplementation(() => {
+      setImmediate(() => {
+        child.stderr.emit("data", Buffer.from("index corruption\n"));
+        child.emit("close", 2);
+      });
+      return child as never;
+    });
+
+    const { POST } = await loadRoute();
+    const res = await POST(makePostRequest() as never);
+    const events = await readSseEvents(res);
+    expect(events.some((e) => e.type === "stderr")).toBe(true);
+    expect(events.some((e) => e.type === "failed" && String(e.error).includes("exited with code 2"))).toBe(
+      true
+    );
+  });
 });

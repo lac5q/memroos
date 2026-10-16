@@ -126,4 +126,39 @@ describe("connector sync-job", () => {
     expect(intervalSpy).not.toHaveBeenCalled();
     intervalSpy.mockRestore();
   });
+
+  it("marks cycle degraded when listing connections fails", async () => {
+    mockListConnections.mockRejectedValue(new Error("nango offline"));
+    const result = await runConnectorCycle(db);
+    expect(result.degraded).toBe(true);
+    expect(result.written).toBe(0);
+  });
+
+  it("skips connections without access tokens", async () => {
+    mockListConnections.mockResolvedValue([
+      {
+        connectionId: "conn-empty",
+        providerKey: "linear",
+        providerConfigKey: "linear-mcp",
+      },
+    ] as Awaited<ReturnType<typeof listNangoConnections>>);
+    mockFetchCreds.mockResolvedValue({ accessToken: "" } as Awaited<
+      ReturnType<typeof fetchNangoCredentials>
+    >);
+
+    const result = await runConnectorCycle(db);
+    expect(result.written).toBe(0);
+    expect(mockInitialize).not.toHaveBeenCalled();
+  });
+
+  it("startConnectorJob schedules when NANGO_SECRET_KEY is set", async () => {
+    vi.resetModules();
+    process.env.NANGO_SECRET_KEY = "test-nango-key";
+    const intervalSpy = vi.spyOn(global, "setInterval").mockReturnValue({ unref: vi.fn() } as never);
+    const { startConnectorJob: startFresh } = await import("../sync-job");
+    startFresh();
+    expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), CONNECTOR_INTERVAL_MS);
+    intervalSpy.mockRestore();
+    delete process.env.NANGO_SECRET_KEY;
+  });
 });

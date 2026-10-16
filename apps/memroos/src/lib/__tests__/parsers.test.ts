@@ -120,6 +120,25 @@ describe("parsers", () => {
       expect(agents[0].company).toBe("HandDrawn");
       expect(agents[0].role).toBe("Reservations");
     });
+
+    it("detects Epilogue Capital and recent active heartbeats", async () => {
+      const agentDir = path.join(root, "epilogue-analyst");
+      await mkdir(agentDir);
+      await writeFile(path.join(agentDir, "HEARTBEAT.md"), "Epilogue Capital weekly review\n");
+      await writeFile(path.join(agentDir, "AGENTS.md"), "Reports to hermes for coordination.\n");
+      const agents = await parseAgents(root);
+      expect(agents[0].company).toBe("Epilogue Capital");
+      expect(agents[0].masterId).toBe("hermes");
+      expect(agents[0].status).toBe("active");
+    });
+
+    it("flags STATUS: blocked markers as error state", async () => {
+      const agentDir = path.join(root, "blocked-agent");
+      await mkdir(agentDir);
+      await writeFile(path.join(agentDir, "HEARTBEAT.md"), "STATUS: blocked on dependency\n");
+      const agents = await parseAgents(root);
+      expect(agents[0].status).toBe("error");
+    });
   });
 
   describe("parseTokenStats", () => {
@@ -128,6 +147,14 @@ describe("parsers", () => {
         throw new Error("missing rtk");
       });
       expect(parseTokenStats()).toBeNull();
+    });
+
+    it("parses byte-scale token counts in rtk output", () => {
+      const output = "Input tokens: 2.5B\nOutput tokens: 900\n";
+      vi.mocked(execFileSync).mockReturnValue(output);
+      const stats = parseTokenStats();
+      expect(stats?.totalInput).toBe(2_500_000_000);
+      expect(stats?.totalOutput).toBe(900);
     });
 
     it("parses rtk gain summary and command breakdown", () => {

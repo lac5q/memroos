@@ -23,6 +23,7 @@ import {
 } from "../graph-catchup";
 import {
   runScheduledGraphCatchup,
+  startGraphCatchupScheduler,
   stopGraphCatchupScheduler,
 } from "@/lib/memory-graph-catchup-scheduler";
 
@@ -381,6 +382,27 @@ describe("graph-catchup incremental checkpointing", () => {
     expect(job?.lastRunAt).toBeTruthy();
     expect(job?.lastSuccessAt).toBeTruthy();
     expect(job?.metadata).toMatchObject({ skipped: true, reason: "neo4j_not_configured" });
+  });
+
+  it("runScheduledGraphCatchup skips when cron job is paused", async () => {
+    process.env.NEO4J_PASSWORD = "test-secret";
+    testDb
+      .prepare(`UPDATE cron_health_jobs SET status = ? WHERE id = ?`)
+      .run("paused", GRAPH_CATCHUP_CRON_ID);
+    const result = await runScheduledGraphCatchup({
+      now: new Date("2026-07-17T12:00:00.000Z"),
+    });
+    expect(result).toEqual({ status: "skipped", reason: "cron_paused_or_stopped" });
+  });
+
+  it("startGraphCatchupScheduler registers interval only once", () => {
+    stopGraphCatchupScheduler();
+    const intervalSpy = vi.spyOn(global, "setInterval").mockReturnValue({ unref: vi.fn() } as never);
+    startGraphCatchupScheduler();
+    startGraphCatchupScheduler();
+    expect(intervalSpy).toHaveBeenCalledTimes(1);
+    intervalSpy.mockRestore();
+    stopGraphCatchupScheduler();
   });
 
   it("writeGraphCatchupCheckpoint round-trips", () => {
