@@ -42,4 +42,20 @@ describe("ReactFlowCanvas", () => {
     expect(screen.getByText("Live topology")).toBeInTheDocument();
     expect(screen.getByText(/15 nodes/)).toBeInTheDocument();
   });
+
+  it("renders topology without registered agents", () => {
+    render(
+      <ReactFlowCanvas
+        services={[]}
+        agentCount={0}
+        activeCount={0}
+        memoryCount={0}
+        knowledgeCount={0}
+        nodeActivity={{}}
+        registeredAgents={[]}
+      />,
+    );
+    expect(screen.getByText("Live topology")).toBeInTheDocument();
+    expect(screen.getByText(/nodes/)).toBeInTheDocument();
+  });
 });

@@ -28,4 +28,16 @@ describe("CollectionTreemap", () => {
     expect(screen.getByTestId("treemap")).toHaveTextContent("playbooks");
     expect(screen.getByTestId("treemap")).not.toHaveTextContent("empty-set");
   });
+
+  it("renders empty treemap when all collections have zero docs", () => {
+    render(
+      <CollectionTreemap
+        collections={[
+          { name: "empty-a", docCount: 0, category: "other" },
+          { name: "empty-b", docCount: 0, category: "business" },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("treemap")).toHaveTextContent("");
+  });
 });

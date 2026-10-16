@@ -43,4 +43,11 @@ describe("ConnectedToolsPage", () => {
       expect(screen.getByPlaceholderText(/Search providers/i)).toBeInTheDocument();
     });
   });
+
+  it("lists providers from API", async () => {
+    wrap(<ConnectedToolsPage />);
+    await waitFor(() => {
+      expect(screen.getByText("GitHub")).toBeInTheDocument();
+    });
+  });
 });

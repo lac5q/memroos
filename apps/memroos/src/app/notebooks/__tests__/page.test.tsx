@@ -19,13 +19,6 @@ vi.mock("@/components/notebooks/memory-list", () => ({
   MemoryList: () => <div data-testid="memory-list" />,
 }));
 
-vi.mock("@/components/notebooks/calendar-heatmap", () => ({
-  CalendarHeatmap: () => <div data-testid="calendar-heatmap" />,
-}));
-
-vi.mock("@/components/notebooks/content-viewer", () => ({
-  ContentViewer: () => null,
-}));
 
 vi.mock("@/components/ui/info-tip", () => ({
   InfoTip: () => null,
@@ -79,5 +72,7 @@ describe("NotebooksPage", () => {
     expect(screen.getByText("Memory Inventory")).toBeInTheDocument();
     expect(screen.getByTestId("memory-inventory-banner")).toBeInTheDocument();
     expect(screen.getByTestId("memory-list")).toBeInTheDocument();
+    expect(screen.getByText("Activity — Last 90 Days")).toBeInTheDocument();
+    expect(screen.getByText("Select a memory to view its content.")).toBeInTheDocument();
   });
 });

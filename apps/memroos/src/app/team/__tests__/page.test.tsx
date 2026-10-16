@@ -38,5 +38,6 @@ describe("TeamPage", () => {
     await waitFor(() => {
       expect(screen.getByText("ops@memroos.com")).toBeInTheDocument();
     });
+    expect(screen.getByText("admin")).toBeInTheDocument();
   });
 });

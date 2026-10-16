@@ -49,5 +49,6 @@ describe("ApiKeysPage", () => {
     await waitFor(() => {
       expect(screen.getByText("CI token")).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: /Generate key/i })).toBeInTheDocument();
   });
 });
