@@ -1,39 +1,12 @@
-import type React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-
-function wrap(ui: React.ReactElement) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
-}
+import { beforeEach, describe, expect, it } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 
 import ConnectedToolsPage from "../page";
+import { stubToolsFetch, wrap } from "./test-helpers";
 
 describe("ConnectedToolsPage", () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo) => {
-        const url = String(input);
-        if (url.includes("/api/tools/providers")) {
-          return {
-            ok: true,
-            json: async () => ({ providers: [{ key: "github", label: "GitHub", authMode: "oauth" }] }),
-          } as Response;
-        }
-        if (url.includes("/api/tools/connections")) {
-          return { ok: true, json: async () => ({ connections: [] }) } as Response;
-        }
-        if (url.includes("/api/tools/activity")) {
-          return { ok: true, json: async () => ({ events: [] }) } as Response;
-        }
-        if (url.includes("/api/tools/usage")) {
-          return { ok: true, json: async () => ({ usage: null, approachingLimit: false }) } as Response;
-        }
-        throw new Error(`Unexpected fetch: ${url}`);
-      }),
-    );
+    stubToolsFetch();
   });
 
   it("renders connected tools header", async () => {
@@ -44,7 +17,7 @@ describe("ConnectedToolsPage", () => {
     });
   });
 
-  it("lists providers from API", async () => {
+  it("lists providers from the registry once providers API resolves", async () => {
     wrap(<ConnectedToolsPage />);
     await waitFor(() => {
       expect(screen.getByText("GitHub")).toBeInTheDocument();
@@ -61,51 +34,27 @@ describe("ConnectedToolsPage", () => {
       expect(screen.getByText(/No providers match/i)).toBeInTheDocument();
     });
   });
-
 });
 
 describe("ConnectedToolsPage enriched dashboard state", () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo) => {
-        const url = String(input);
-        if (url.includes("/api/tools/providers")) {
-          return {
-            ok: true,
-            json: async () => ({ providers: [{ key: "github", label: "GitHub", authMode: "oauth" }] }),
-          } as Response;
-        }
-        if (url.includes("/api/tools/connections")) {
-          return { ok: true, json: async () => ({ connections: [] }) } as Response;
-        }
-        if (url.includes("/api/tools/activity")) {
-          return {
-            ok: true,
-            json: async () => ({
-              events: [
-                {
-                  id: "evt-1",
-                  providerKey: "github",
-                  type: "test_succeeded",
-                  at: new Date().toISOString(),
-                },
-              ],
-            }),
-          } as Response;
-        }
-        if (url.includes("/api/tools/usage")) {
-          return {
-            ok: true,
-            json: async () => ({
-              usage: { used: 4, limit: 5, plan: "starter" },
-              approachingLimit: true,
-            }),
-          } as Response;
-        }
-        throw new Error(`Unexpected fetch: ${url}`);
-      }),
-    );
+    stubToolsFetch({
+      activity: {
+        events: [
+          {
+            id: "evt-1",
+            providerKey: "github",
+            type: "test_succeeded",
+            connectionId: "c1",
+            at: new Date().toISOString(),
+          },
+        ],
+      },
+      usage: {
+        usage: { used: 4, limit: 5, plan: "starter" },
+        approachingLimit: true,
+      },
+    });
   });
 
   it("renders usage meter, recent activity, and empty-connection guidance", async () => {
