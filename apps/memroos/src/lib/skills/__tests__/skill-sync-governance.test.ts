@@ -1121,6 +1121,39 @@ describe("pin lookup helpers and agent-scoped rollback", () => {
     ).toThrow(SyncGovernanceError);
   });
 
+  it("sanitize helpers reject non-string harness, skill, actor, version, and hash inputs", async () => {
+    const { detectSkillChange, createOrUpdateAgentVersionPin, SyncGovernanceError } =
+      await importSyncModule();
+    expect(() =>
+      detectSkillChange(db, {
+        source_harness: 9 as unknown as string,
+        skill_name: "x",
+        detected_content_hash: "0".repeat(64),
+        proposed_by: "scanner",
+      })
+    ).toThrow(SyncGovernanceError);
+    expect(() =>
+      detectSkillChange(db, {
+        source_harness: "claude",
+        skill_name: null as unknown as string,
+        detected_content_hash: "0".repeat(64),
+        proposed_by: "scanner",
+      })
+    ).toThrow(SyncGovernanceError);
+    insertAgent("sanitize-agent", "Sanitize Agent");
+    const skillId = insertSkillRow({ name: "sanitize-skill", dispatch_status: "enabled" });
+    expect(() =>
+      createOrUpdateAgentVersionPin(db, {
+        agent_id: "sanitize-agent",
+        skill_name: "sanitize-skill",
+        skill_id: skillId,
+        current_version: null as unknown as string,
+        current_content_hash: "0".repeat(64),
+        actor: "alice",
+      })
+    ).toThrow(SyncGovernanceError);
+  });
+
   it("detectSkillChange rejects empty harness, skill name, actor, and malformed hashes", async () => {
     const { detectSkillChange, SyncGovernanceError } = await importSyncModule();
     expect(() =>

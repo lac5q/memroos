@@ -37,4 +37,13 @@ describe("GET /api/connmem/status", () => {
     const res = await GET(new Request("http://localhost/api/connmem/status") as never);
     expect(res.status).toBe(502);
   });
+
+  it("returns 502 when upstream is unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("network down");
+    }));
+    const res = await GET(new Request("http://localhost/api/connmem/status") as never);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("network down") });
+  });
 });

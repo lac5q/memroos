@@ -125,6 +125,85 @@ describe("POST /api/library/qmd-update", () => {
     );
   });
 
+  it("streams failed when serializeQmdUpdate throws before spawn", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/memory/qmd", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/memory/qmd")>("@/lib/memory/qmd");
+      return {
+        ...actual,
+        serializeQmdUpdate: () => {
+          throw new Error("serialize failed");
+        },
+      };
+    });
+    const { POST } = await import("../route");
+    const res = await POST(makePostRequest() as never);
+    const events = await readSseEvents(res);
+    expect(events.some((e) => e.type === "failed" && String(e.error).includes("serialize failed"))).toBe(
+      true
+    );
+    vi.doUnmock("@/lib/memory/qmd");
+    vi.resetModules();
+  });
+
+  it("streams failed when the child process emits error", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      killed: boolean;
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.pid = 777;
+    child.killed = false;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = vi.fn();
+
+    vi.mocked(spawn).mockImplementation(() => {
+      setImmediate(() => child.emit("error", new Error("broken pipe")));
+      return child as never;
+    });
+
+    const { POST } = await loadRoute();
+    const res = await POST(makePostRequest() as never);
+    const events = await readSseEvents(res);
+    expect(events.some((e) => e.type === "failed" && String(e.error).includes("broken pipe"))).toBe(true);
+  });
+
+  it("finalizes as cancelled when the client aborts the request", async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      killed: boolean;
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.pid = 888;
+    child.killed = false;
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.kill = vi.fn(() => {
+      child.killed = true;
+    });
+
+    vi.mocked(spawn).mockImplementation(() => child as never);
+
+    const controller = new AbortController();
+    const req = new Request("http://localhost/api/library/qmd-update", {
+      method: "POST",
+      signal: controller.signal,
+    });
+    const { POST } = await loadRoute();
+    const resPromise = POST(req as never);
+    await new Promise((resolve) => setImmediate(resolve));
+    controller.abort();
+    const res = await resPromise;
+    expect(child.kill).toHaveBeenCalled();
+    const events = await readSseEvents(res);
+    expect(events.some((e) => e.type === "queued")).toBe(true);
+  });
+
   it("streams stderr and failed when qmd exits non-zero", async () => {
     const child = new EventEmitter() as EventEmitter & {
       pid: number;

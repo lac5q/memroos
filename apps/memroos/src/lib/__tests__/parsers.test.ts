@@ -140,6 +140,13 @@ describe("parsers", () => {
       expect(agents[0].status).toBe("error");
     });
 
+    it("skips projects whose memory directory cannot be read", async () => {
+      const projectDir = path.join(root, "proj-no-memory");
+      await mkdir(projectDir);
+      await writeFile(path.join(projectDir, "README.md"), "no memory dir here");
+      await expect(parseClaudeMemory(root)).resolves.toEqual([]);
+    });
+
     it("detects gemini/opencode/zcode/openclaw platforms", async () => {
       for (const id of ["gemini-bot", "opencode-bot", "zcode-bot", "openclaw-bot"]) {
         await mkdir(path.join(root, id));
@@ -327,6 +334,81 @@ describe("parsers", () => {
         ]);
         expect(usage.total.requests).toBe(2);
         expect(usage.total.inputTokens).toBeGreaterThan(0);
+      } finally {
+        process.env.HOME = prev;
+      }
+    });
+
+    it("aggregates multiple assistant lines into one model stat and normalizes opus/sonnet names", async () => {
+      const prev = process.env.HOME;
+      process.env.HOME = root;
+      const projectDir = path.join(root, ".claude", "projects", "models");
+      await mkdir(projectDir, { recursive: true });
+      const jsonl = [
+        JSON.stringify({
+          type: "assistant",
+          requestId: "dup-req",
+          timestamp: new Date().toISOString(),
+          message: {
+            model: "claude-opus-4-6",
+            usage: { input_tokens: 4, output_tokens: 2, cache_read_input_tokens: 1 },
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          requestId: "dup-req",
+          timestamp: new Date().toISOString(),
+          message: {
+            model: "claude-opus-4-6",
+            usage: { input_tokens: 99, output_tokens: 99 },
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          requestId: "sonnet-req",
+          timestamp: new Date().toISOString(),
+          message: {
+            model: "claude-sonnet-4-5",
+            usage: { input_tokens: 3, output_tokens: 1, cache_creation_input_tokens: 2 },
+          },
+        }),
+      ].join("\n");
+      await writeFile(path.join(projectDir, "session.jsonl"), jsonl);
+      try {
+        const usage = await parseModelUsage();
+        const opus = usage.models.find((m) => m.name === "Opus 4.6");
+        const sonnet = usage.models.find((m) => m.name === "Sonnet 4.5");
+        expect(opus?.requests).toBe(1);
+        expect(opus?.inputTokens).toBe(4);
+        expect(opus?.cacheRead).toBe(1);
+        expect(sonnet?.requests).toBe(1);
+        expect(sonnet?.cacheCreation).toBe(2);
+      } finally {
+        process.env.HOME = prev;
+      }
+    });
+
+    it("skips jsonl files older than the since filter", async () => {
+      const prev = process.env.HOME;
+      process.env.HOME = root;
+      const projectDir = path.join(root, ".claude", "projects", "stale");
+      await mkdir(projectDir, { recursive: true });
+      const stalePath = path.join(projectDir, "old.jsonl");
+      await writeFile(
+        stalePath,
+        JSON.stringify({
+          type: "assistant",
+          requestId: "old",
+          timestamp: "1999-01-01T00:00:00.000Z",
+          message: { model: "claude-haiku-4-5", usage: { input_tokens: 1, output_tokens: 1 } },
+        })
+      );
+      const { utimes } = await import("fs/promises");
+      const old = new Date("1999-01-01T00:00:00.000Z");
+      await utimes(stalePath, old, old);
+      try {
+        const usage = await parseModelUsage(new Date("2026-01-01T00:00:00.000Z"));
+        expect(usage.total.requests).toBe(0);
       } finally {
         process.env.HOME = prev;
       }

@@ -28,4 +28,20 @@ describe("CycleStatus", () => {
     expect(screen.getByText("Approved for worker")).toBeInTheDocument();
     expect(screen.getByText("Archived history")).toBeInTheDocument();
   });
+
+  it("shows Never when lastRun is null", () => {
+    render(
+      <CycleStatus
+        stats={{
+          lastRun: null,
+          totalProposals: 0,
+          pendingProposals: 0,
+          approvedProposals: 0,
+          archivedProposals: 0,
+          recentLogLines: [],
+        }}
+      />
+    );
+    expect(screen.getByText("Never")).toBeInTheDocument();
+  });
 });

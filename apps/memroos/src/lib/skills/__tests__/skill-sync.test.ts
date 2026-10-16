@@ -26,7 +26,7 @@
  *                   (dispatch_status != 'enabled'), not direct enablement.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import crypto from "crypto";
 import fs from "fs";
 import os from "os";
@@ -1629,6 +1629,89 @@ describe("skill-sync validation and failure paths", () => {
     expect(second.created).toBe(0);
   });
 
+  it("requireNonEmpty rejects non-string operator values", async () => {
+    const { approveImportProposal, SkillSyncError } = await import("../skill-sync");
+    expect(() =>
+      approveImportProposal(db, {
+        skill_name: "x",
+        source_harness: "claude",
+        operator: 0 as unknown as string,
+      })
+    ).toThrow(SkillSyncError);
+  });
+
+  it("listSyncObservability marks rejected status when pending id remains set", async () => {
+    const { createImportProposal, rejectImportProposal, listSyncObservability } =
+      await import("../skill-sync");
+    insertSkillRow({ name: "rej-obs", content_hash: "0".repeat(64) });
+    const { proposal } = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "rej-obs",
+        source_harness: "claude",
+        version: "2.0.0",
+        raw_body: VALID_SKILL_MD("rej-obs", "2.0.0"),
+        content_hash: "1".repeat(64),
+      },
+      proposed_by: "scanner",
+    });
+    rejectImportProposal(db, {
+      skill_name: "rej-obs",
+      source_harness: "claude",
+      operator: "bob",
+      reason: "nope",
+    });
+    db.prepare(
+      `UPDATE skill_sync_state
+          SET pending_proposal_id = ?, rejected_at = ?, approved_at = NULL
+        WHERE skill_name = ? AND source_harness = ?`
+    ).run(proposal.pending_proposal_id, new Date().toISOString(), "rej-obs", "claude");
+    const item = listSyncObservability(db).find((o) => o.skill_name === "rej-obs");
+    expect(item?.status).toBe("rejected");
+  });
+
+  it("createImportProposal updates last_check_at when registry hash already matches", async () => {
+    const { createImportProposal, computeContentHash } = await import("../skill-sync");
+    const body = VALID_SKILL_MD("sync-touch", "1.0.0");
+    const hash = computeContentHash(body);
+    insertSkillRow({
+      name: "sync-touch",
+      content_hash: hash,
+      version: "1.0.0",
+      raw_body: body,
+    });
+    createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "sync-touch",
+        source_harness: "claude",
+        version: "1.0.0",
+        raw_body: body,
+        content_hash: hash,
+      },
+      proposed_by: "scanner",
+    });
+    const before = db
+      .prepare(`SELECT last_check_at FROM skill_sync_state WHERE skill_name = ?`)
+      .get("sync-touch") as { last_check_at: string };
+    await new Promise((r) => setTimeout(r, 5));
+    createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "sync-touch",
+        source_harness: "claude",
+        version: "1.0.0",
+        raw_body: body,
+        content_hash: hash,
+      },
+      proposed_by: "scanner",
+    });
+    const after = db
+      .prepare(`SELECT last_check_at FROM skill_sync_state WHERE skill_name = ?`)
+      .get("sync-touch") as { last_check_at: string };
+    expect(after.last_check_at >= before.last_check_at).toBe(true);
+  });
+
   it("approveImportProposal can skip registry mutation when apply_to_registry is false", async () => {
     const { createImportProposal, approveImportProposal } = await import("../skill-sync");
     const id = insertSkillRow({
@@ -1658,6 +1741,35 @@ describe("skill-sync validation and failure paths", () => {
       .get(id) as { dispatch_status: string; content_hash: string };
     expect(reg.dispatch_status).toBe("enabled");
     expect(reg.content_hash).toBe("0".repeat(64));
+  });
+});
+
+describe("detectHarnessSkills filesystem failure paths", () => {
+  it("records readdir failures without aborting the scan", async () => {
+    const { detectHarnessSkills } = await import("../skill-sync");
+    const harnessRoots = buildHarnessRoots(TMP_ROOT);
+    fs.mkdirSync(harnessRoots.claude, { recursive: true });
+    fs.chmodSync(harnessRoots.claude, 0o000);
+    try {
+      const result = detectHarnessSkills({ roots: harnessRoots });
+      expect(result.errors.some((e) => e.reason.includes("Cannot read directory"))).toBe(true);
+    } finally {
+      fs.chmodSync(harnessRoots.claude, 0o755);
+    }
+  });
+
+  it("extracts version frontmatter via detectHarnessSkills entries", async () => {
+    const { detectHarnessSkills } = await import("../skill-sync");
+    const harnessRoots = buildHarnessRoots(TMP_ROOT);
+    fs.mkdirSync(harnessRoots.hermes, { recursive: true });
+    fs.writeFileSync(
+      path.join(harnessRoots.hermes, "versioned-skill.md"),
+      "---\nname: versioned-skill\nversion: 9.8.7\n---\n\n# Body\n",
+      "utf8"
+    );
+    const detected = detectHarnessSkills({ roots: harnessRoots });
+    const entry = detected.entries.find((e) => e.skill_name === "versioned-skill");
+    expect(entry?.version).toBe("9.8.7");
   });
 });
 

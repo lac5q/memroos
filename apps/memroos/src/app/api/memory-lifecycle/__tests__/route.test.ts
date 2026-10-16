@@ -36,6 +36,17 @@ afterEach(() => {
 });
 
 describe("memory lifecycle API routes", () => {
+  it("returns 400 when decay receives an invalid now timestamp", async () => {
+    const res = await decayPost(
+      jsonRequest({
+        runKey: "route-decay-invalid-now",
+        now: "   ",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false, error: "now is required" });
+  });
+
   it("supports policy registration, legal hold skip, release, and later expiry", async () => {
     const policyResponse = await retentionPost(
       jsonRequest({

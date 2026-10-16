@@ -1007,4 +1007,26 @@ describe("graph-catchup incremental checkpointing", () => {
     expect(summary.projected).toBe(1);
     expect(summary.pages).toBe(1);
   });
+
+  it("readGraphCatchupCheckpoint returns defaults for unknown checkpoint ids", () => {
+    const checkpoint = readGraphCatchupCheckpoint(testDb, "custom-checkpoint-id");
+    expect(checkpoint.id).toBe("custom-checkpoint-id");
+    expect(checkpoint.episodicLastId).toBe(0);
+  });
+
+  it("uses built-in sleep/log defaults when options omit overrides", async () => {
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const summary = await runGraphCatchup(testDb, {
+      oneshot: true,
+      skipEpisodic: true,
+      writeDelayMs: 1,
+      now: new Date("2026-07-17T12:00:00.000Z"),
+      fetchVectorPage: async () => ({ items: [], nextCursor: null }),
+      projectFact: async () => undefined,
+    });
+    expect(summary.status).toBe("completed");
+    expect(logSpy.mock.calls.some((call) => String(call[0]).includes("[graph-catchup]"))).toBe(true);
+    logSpy.mockRestore();
+  });
 });

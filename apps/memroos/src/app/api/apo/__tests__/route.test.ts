@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -240,6 +240,20 @@ describe("GET /api/apo", () => {
     const { GET } = await loadRoute();
     const body = await (await GET()).json();
     expect(body.stats.lastRun).toEqual(expect.any(String));
+  });
+
+  it("ignores unreadable proposal files when listing", async () => {
+    const unreadable = path.join(proposalsPath, "APO_PROPOSAL_unreadable_unreadable_20260505_150001.md");
+    writeFileSync(unreadable, proposalBody);
+    chmodSync(unreadable, 0o000);
+    try {
+      const { GET } = await loadRoute();
+      const body = await (await GET()).json();
+      expect(body.stats.totalProposals).toBe(1);
+      expect(body.proposals.every((p: { id: string }) => p.id === proposalFilename)).toBe(true);
+    } finally {
+      chmodSync(unreadable, 0o644);
+    }
   });
 
   it("sorts proposals pending before approved before archived", async () => {

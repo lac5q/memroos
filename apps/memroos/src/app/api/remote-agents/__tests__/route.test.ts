@@ -18,4 +18,12 @@ describe("GET /api/remote-agents", () => {
     expect(body.agents).toHaveLength(1);
     expect(body.agents[0].status).toBe("active");
   });
+
+  it("returns 500 when polling remote agents fails", async () => {
+    const { pollAllRemoteAgents } = await import("@/lib/agent-registry");
+    vi.mocked(pollAllRemoteAgents).mockRejectedValueOnce(new Error("poll failed"));
+    const res = await GET();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "poll failed" });
+  });
 });

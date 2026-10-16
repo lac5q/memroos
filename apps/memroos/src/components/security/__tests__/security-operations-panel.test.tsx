@@ -55,4 +55,36 @@ describe("SecurityOperationsPanel", () => {
     expect(screen.getByText("JWT rotation")).toBeInTheDocument();
     expect(screen.getByText("Recent Security Events")).toBeInTheDocument();
   });
+
+  it("falls back to audit activity when security timeline is empty", () => {
+    api.useSecurityReport.mockReturnValue({
+      isLoading: false,
+      data: {
+        summary: {
+          status: "attention",
+          securityEvents: 0,
+          blockedAttempts: 0,
+          highSeverity: 0,
+          lastEventAt: null,
+        },
+        timeline: [],
+        auditActivity: [
+          {
+            id: "a1",
+            actor: "system",
+            action: "policy_update",
+            target: "security",
+            timestamp: new Date().toISOString(),
+            detail: "Updated control",
+          },
+        ],
+        controls: [],
+      },
+    });
+
+    render(<SecurityOperationsPanel />);
+    expect(screen.getByText("attention")).toBeInTheDocument();
+    expect(screen.getByText("policy_update")).toBeInTheDocument();
+    expect(screen.getByText("no events")).toBeInTheDocument();
+  });
 });

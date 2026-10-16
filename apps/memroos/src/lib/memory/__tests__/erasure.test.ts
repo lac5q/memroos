@@ -355,6 +355,24 @@ describe("traverseIndirectDerivatives extended graph walks", () => {
     expect(indirect.some((d) => d.provenance === "erasure_report_snapshot")).toBe(true);
   });
 
+  it("ignores non-object entries inside prior erasure report snapshots", () => {
+    const identity = buildCanonicalIdentity("array skip", "vault", "ingress", "vault");
+    db.prepare(
+      `INSERT INTO memory_erasure_reports (id, canonical_id, store_outcomes_json)
+       VALUES (?, ?, ?)`
+    ).run(
+      "er-array",
+      identity.id,
+      JSON.stringify([
+        null,
+        "bad",
+        { storeId: "platform", status: "tombstoned", sourceHash: identity.canonicalHash },
+      ])
+    );
+    const indirect = traverseIndirectDerivatives(db, identity);
+    expect(indirect.some((d) => d.storeId === "platform")).toBe(true);
+  });
+
   it("skips malformed prior erasure report JSON", () => {
     const identity = buildCanonicalIdentity("bad json", "vault", "ingress", "vault");
     db.prepare(
