@@ -1,11 +1,14 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
 
 const api = vi.hoisted(() => ({
   useContextSourceHealth: vi.fn(),
   useLibraryFreshness: vi.fn(),
   useTriggerQmdUpdate: vi.fn(),
 }));
+
+const trigger = vi.fn().mockResolvedValue(undefined);
+const refetch = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   useContextSourceHealth: api.useContextSourceHealth,
@@ -22,19 +25,21 @@ describe("ContextSourcesPanel", () => {
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ role: "reviewer" }),
+        json: async () => ({ role: "operator" }),
       })),
     );
     api.useTriggerQmdUpdate.mockReturnValue({
-      events: [],
+      events: [{ type: "started", pid: 123 }],
       isStreaming: false,
-      trigger: vi.fn(),
+      trigger,
     });
     api.useLibraryFreshness.mockReturnValue({
-      data: { state: "live", ageMs: 120_000, documentCount: 4, lastIndexedAt: null },
+      data: {
+        collections: [{ collection: "playbooks", state: "live", ageMs: 120_000 }],
+      },
       isLoading: false,
       error: null,
-      refetch: vi.fn(),
+      refetch,
     });
   });
 
@@ -59,16 +64,39 @@ describe("ContextSourcesPanel", () => {
     expect(screen.getByText("Context Sources")).toBeInTheDocument();
     expect(screen.getByText("gmail")).toBeInTheDocument();
     expect(screen.getByText("Index Freshness")).toBeInTheDocument();
+    expect(screen.getByText("playbooks")).toBeInTheDocument();
   });
 
-  it("shows loading state for sources", () => {
+  it("shows loading and error states", () => {
     api.useContextSourceHealth.mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
     });
-
-    render(<ContextSourcesPanel />);
+    const { rerender } = render(<ContextSourcesPanel />);
     expect(screen.getByText(/Loading context sources/i)).toBeInTheDocument();
+
+    api.useContextSourceHealth.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("down"),
+    });
+    rerender(<ContextSourcesPanel />);
+    expect(screen.getByText(/Failed to load context source health/i)).toBeInTheDocument();
+  });
+
+  it("lets operators refresh index and shows stream log", async () => {
+    api.useContextSourceHealth.mockReturnValue({
+      data: { sources: [] },
+      isLoading: false,
+      error: null,
+    });
+    render(<ContextSourcesPanel />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh Index" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Index" }));
+    expect(trigger).toHaveBeenCalled();
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
+    expect(screen.getByText(/qmd update started/i)).toBeInTheDocument();
   });
 });

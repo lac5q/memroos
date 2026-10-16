@@ -1,16 +1,20 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
 
 import { TopologyCanvas } from "../topology-canvas";
 
 const TOPOLOGY = {
   canvas: { width: 800, height: 400 },
-  columns: [],
-  notices: [],
+  columns: [{ x: 100, label: "Gateway" }],
+  notices: ["No agents registered in this column."],
   nodes: [
-    { id: "memroos", label: "MemroOS", sub: "core", x: 10, y: 10, w: 120, h: 40, type: "core" as const },
+    { id: "memroos", label: "MemroOS", sub: "core", x: 10, y: 60, w: 120, h: 100, t: "core" as const, live: false },
+    { id: "agent-a", label: "Agent A", sub: "live", x: 200, y: 60, w: 120, h: 40, t: "agent" as const, live: true },
   ],
-  edges: [],
+  edges: [
+    { from: "memroos", to: "agent-a", weight: 0.5, kind: "pack" as const, measured: true },
+    { from: "agent-a", to: "memroos", weight: 0.2, kind: "loop" as const, measured: false },
+  ],
 };
 
 describe("TopologyCanvas", () => {
@@ -31,6 +35,8 @@ describe("TopologyCanvas", () => {
     await waitFor(() => {
       expect(screen.getByText(/MemroOS/)).toBeInTheDocument();
     });
+    expect(screen.getByText(/capture → consolidate/)).toBeInTheDocument();
+    expect(screen.getByText(/No agents registered in this column/)).toBeInTheDocument();
   });
 
   it("shows error when topology fetch fails", async () => {
@@ -40,5 +46,16 @@ describe("TopologyCanvas", () => {
     await waitFor(() => {
       expect(screen.getByText(/Workflow map unavailable/i)).toBeInTheDocument();
     });
+  });
+
+  it("selects nodes and emits detail metadata", async () => {
+    const onSelect = vi.fn();
+    const onSelectNode = vi.fn();
+    render(<TopologyCanvas selectedId={null} onSelect={onSelect} onSelectNode={onSelectNode} />);
+
+    await waitFor(() => expect(screen.getByText("Agent A")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Agent A"));
+    expect(onSelect).toHaveBeenCalledWith("agent-a");
+    expect(onSelectNode).toHaveBeenCalledWith({ label: "Agent A", sub: "live" });
   });
 });
