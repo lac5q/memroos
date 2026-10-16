@@ -436,6 +436,40 @@ describe("VAL-ORCH-006 -- readViaMsiqAdapter and closeMsiqSession", () => {
     }
   });
 
+  it("expires active sessions lazily on read and denies subsequent writes", async () => {
+    const { openMsiqSession, readViaMsiqAdapter, writeViaMsiqAdapter } = await loadAdapter();
+    const session = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: makeActor(),
+      spaceId: "space-1",
+      label: makeLabel(),
+      purpose: "memory_search",
+      beliefStage: "silver_candidate_claim",
+    });
+    if (session.kind !== "opened") throw new Error("session failed");
+    const past = new Date(Date.now() - 60_000).toISOString();
+    db.prepare(
+      `UPDATE msiq_adapter_sessions SET expires_at = ?, label_json = ? WHERE session_token = ?`
+    ).run(past, "{not-label-json", session.sessionToken);
+
+    const read = readViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      query: "hello",
+      limit: 1,
+    });
+    expect(read.kind).toBe("denied");
+    if (read.kind === "denied") {
+      expect(read.reason).toMatch(/session_(expired|closed)/);
+    }
+
+    const write = writeViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      idempotencyKey: "after-expiry",
+      payload: { content: "late write" },
+    });
+    expect(write.kind).toBe("denied");
+  });
+
   it("foundry-only mode refuses hosted fallback without provider override", async () => {
     const { openMsiqSession } = await loadAdapter();
     const session = openMsiqSession(db, {

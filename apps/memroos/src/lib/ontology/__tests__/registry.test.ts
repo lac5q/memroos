@@ -506,6 +506,68 @@ describe("ontology registry validation", () => {
     })).toThrow(/dependency is invalid/);
   });
 
+  it("rejects invalid pack aliases and malformed relationship objects", async () => {
+    const { mod, ontology } = await canonical();
+    const base = mod.registerDomainPack(db, {
+      namespace: "alias.base",
+      owner: "ops",
+      version: "1.0.0",
+      sourceHash: SOURCE_HASH,
+      provenanceSummary: {
+        sourceId: "src_alias_base",
+        classification: "internal",
+        importedAt: "2026-07-12T00:00:00Z",
+        references: ["ref_alias_base"],
+      },
+      ontology: { id: ontology.ontologyId, version: ontology.version, contentHash: ontology.contentHash },
+      types: [packType(ontology, "alias.base.record")],
+      actor: "operator",
+    });
+    mod.transitionDomainPack(db, { packId: base.id, toState: "approved", actor: "operator" });
+
+    expect(() =>
+      mod.registerDomainPack(db, {
+        namespace: "alias.bad",
+        owner: "ops",
+        version: "1.0.0",
+        sourceHash: SOURCE_HASH,
+        provenanceSummary: {
+          sourceId: "src_alias_bad",
+          classification: "internal",
+          importedAt: "2026-07-12T00:00:00Z",
+          references: ["ref_alias_bad"],
+        },
+        ontology: base.ontology,
+        types: [
+          {
+            ...packType(ontology, "alias.bad.child"),
+            aliases: ["not-a-valid-alias!!!"],
+          },
+        ],
+        actor: "operator",
+      })
+    ).toThrow(/Pack alias must use a valid namespace-qualified identifier/);
+
+    expect(() =>
+      mod.registerDomainPack(db, {
+        namespace: "alias.rel",
+        owner: "ops",
+        version: "1.0.0",
+        sourceHash: SOURCE_HASH,
+        provenanceSummary: {
+          sourceId: "src_alias_rel",
+          classification: "internal",
+          importedAt: "2026-07-12T00:00:00Z",
+          references: ["ref_alias_rel"],
+        },
+        ontology: base.ontology,
+        types: [packType(ontology, "alias.rel.child")],
+        relationships: [{ from: "alias.rel.child", to: 123 as unknown as string, type: "is_a" }],
+        actor: "operator",
+      })
+    ).toThrow(/Pack relationship is invalid/);
+  });
+
   it("VAL-ONTO-009 rolls back ontology publication when its paired audit row fails", async () => {
     const { mod, ontology } = await canonical();
     db.exec(`

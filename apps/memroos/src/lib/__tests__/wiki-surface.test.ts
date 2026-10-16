@@ -143,6 +143,57 @@ describe("wiki-digest", () => {
     );
   });
 
+  it("creates wiki index and log files on first non-dry-run digest", async () => {
+    const kb = makeVault();
+    const wikiRoot = path.join(kb, "llm-wiki", "wiki");
+    fs.rmSync(path.join(wikiRoot, "index.md"), { force: true });
+    fs.rmSync(path.join(wikiRoot, "log.md"), { force: true });
+
+    await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: false,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      fetchMemories: async () => [
+        {
+          id: "m-index",
+          content: "First digest creates index and log scaffolding.",
+          createdAt: "2026-07-18T11:45:00.000Z",
+        },
+      ],
+      log: () => undefined,
+    });
+
+    expect(fs.existsSync(path.join(wikiRoot, "index.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(wikiRoot, "index.md"), "utf8")).toContain("# Wiki Index");
+    expect(fs.existsSync(path.join(wikiRoot, "log.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(wikiRoot, "log.md"), "utf8")).toContain("# Wiki Log");
+  });
+
+  it("merges graph nodes when the existing graph file is corrupt", async () => {
+    const kb = makeVault();
+    const graphPath = path.join(kb, "llm-wiki", "wiki", "graph", "knowledge-graph.json");
+    fs.mkdirSync(path.dirname(graphPath), { recursive: true });
+    fs.writeFileSync(graphPath, "{broken-json", "utf8");
+
+    const summary = await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: false,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      fetchMemories: async () => [
+        {
+          id: "m-graph",
+          content: "Graph merge should recover from invalid JSON on disk.",
+          createdAt: "2026-07-18T11:50:00.000Z",
+        },
+      ],
+      log: () => undefined,
+    });
+
+    expect(summary.written).toBe(1);
+    const graph = JSON.parse(fs.readFileSync(graphPath, "utf8")) as { nodes: Array<{ id: string }> };
+    expect(graph.nodes.some((n) => n.id.includes("memroos-digest"))).toBe(true);
+  });
+
   it("writes pages, updates watermark, and refreshes graph", async () => {
     const kb = makeVault();
     const summary = await runWikiDigest({

@@ -241,6 +241,20 @@ describe("GET /api/apo", () => {
     const body = await (await GET()).json();
     expect(body.stats.lastRun).toEqual(expect.any(String));
   });
+
+  it("sorts proposals pending before approved before archived", async () => {
+    const approvedName = "APO_PROPOSAL_ops_ops_20260505_130000.md";
+    const archivedName = "APO_PROPOSAL_archive_archive_20260505_140000.md";
+    mkdirSync(path.join(proposalsPath, "approved"), { recursive: true });
+    mkdirSync(path.join(proposalsPath, "archived"), { recursive: true });
+    writeFileSync(path.join(proposalsPath, "approved", approvedName), proposalBody);
+    writeFileSync(path.join(proposalsPath, "archived", archivedName), proposalBody);
+
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const statuses = body.proposals.map((p: { status: string }) => p.status);
+    expect(statuses).toEqual(["pending", "approved", "archived"]);
+  });
 });
 
 describe("POST /api/apo validation and errors", () => {
