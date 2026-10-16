@@ -55,6 +55,67 @@ describe("POST /api/dsar/export", () => {
     expect([401, 403]).toContain(res.status);
   });
 
+  it("returns 400 for invalid JSON and validation errors", async () => {
+    authenticateUser.mockResolvedValueOnce({
+      userId: "admin",
+      role: "admin",
+      email: "admin@example.com",
+      displayName: "Admin",
+      tenantId: "default-tenant",
+    });
+    expect(
+      (
+        await POST(
+          new Request("http://localhost/api/dsar/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: "{",
+          }) as never
+        )
+      ).status
+    ).toBe(400);
+
+    authenticateUser.mockResolvedValueOnce({
+      userId: "admin",
+      role: "admin",
+      email: "admin@example.com",
+      displayName: "Admin",
+      tenantId: "default-tenant",
+    });
+    expect(
+      (
+        await POST(
+          new Request("http://localhost/api/dsar/export", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: "" }),
+          }) as never
+        )
+      ).status
+    ).toBe(400);
+  });
+
+  it("returns 500 when export fails", async () => {
+    authenticateUser.mockResolvedValueOnce({
+      userId: "admin",
+      role: "admin",
+      email: "admin@example.com",
+      displayName: "Admin",
+      tenantId: "default-tenant",
+    });
+    exportDsarPackage.mockImplementationOnce(() => {
+      throw new Error("export failed");
+    });
+    const res = await POST(
+      new Request("http://localhost/api/dsar/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "user-123" }),
+      }) as never
+    );
+    expect(res.status).toBe(500);
+  });
+
   it("returns attachment for valid admin export", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "admin",

@@ -53,6 +53,42 @@ describe("POST /api/dsar/delete", () => {
     expect(res.status).toBe(403);
   });
 
+  it("returns 400 for invalid JSON", async () => {
+    authenticateUser.mockResolvedValueOnce({
+      userId: "admin",
+      role: "admin",
+      email: "admin@example.com",
+      displayName: "Admin",
+      tenantId: "default-tenant",
+    });
+    const res = await POST(
+      new Request("http://localhost/api/dsar/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{",
+      }) as never
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when userId validation fails", async () => {
+    authenticateUser.mockResolvedValueOnce({
+      userId: "admin",
+      role: "admin",
+      email: "admin@example.com",
+      displayName: "Admin",
+      tenantId: "default-tenant",
+    });
+    const res = await POST(
+      new Request("http://localhost/api/dsar/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: "" }),
+      }) as never
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("tombstones user for admin", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "admin",

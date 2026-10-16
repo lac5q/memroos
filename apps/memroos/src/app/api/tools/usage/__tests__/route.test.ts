@@ -48,6 +48,21 @@ describe("GET /api/tools/usage", () => {
     expect(body.approachingLimit).toBe(false);
   });
 
+  it("returns 502 for upstream nango errors", async () => {
+    authenticateUser.mockResolvedValueOnce({
+      userId: "u1",
+      role: "operator",
+      email: "op@example.com",
+      displayName: "Op",
+      tenantId: "default-tenant",
+    });
+    const { ToolAuthUpstreamError } = await import("@/lib/tool-auth/nango-client");
+    getNangoUsage.mockRejectedValueOnce(new ToolAuthUpstreamError("upstream down"));
+    const res = await GET(new Request("http://localhost/api/tools/usage") as never);
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "nango_upstream_error" });
+  });
+
   it("returns 503 when nango not configured", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "u1",

@@ -39,6 +39,28 @@ describe("agent-onboarding", () => {
     }
   });
 
+  it("uses the local dev signing secret when env secrets are unset", () => {
+    delete process.env.MEMROOS_ONBOARDING_SECRET;
+    delete process.env.MEMROOS_OPERATOR_API_KEY;
+    const { token } = createAgentOnboardingToken({ memroosUrl: "https://memroos.example" });
+    expect(verifyAgentOnboardingToken(token).ok).toBe(true);
+  });
+
+  it("rejects tokens whose payload segment is not valid base64 JSON", async () => {
+    process.env.MEMROOS_ONBOARDING_SECRET = "test-onboarding-secret";
+    // Signature must match the body or verify fails before payload decode.
+    const crypto = await import("crypto");
+    const body = Buffer.from("not-json").toString("base64url");
+    const signature = crypto
+      .createHmac("sha256", "test-onboarding-secret")
+      .update(body)
+      .digest("base64url");
+    expect(verifyAgentOnboardingToken(`${body}.${signature}`)).toEqual({
+      ok: false,
+      error: "Invalid onboarding token payload",
+    });
+  });
+
   it("rejects tampered signatures and malformed tokens", () => {
     process.env.MEMROOS_ONBOARDING_SECRET = "test-onboarding-secret";
     const { token } = createAgentOnboardingToken({

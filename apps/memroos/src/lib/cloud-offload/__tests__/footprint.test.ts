@@ -33,6 +33,13 @@ describe("cloud offload footprint inventory", () => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
+  it("resolves home-relative store paths in default profiles", () => {
+    const repo = tmpRepo();
+    const runtime = defaultLocalStoreProfiles(repo).find((profile) => profile.id === "runtime-env");
+    expect(runtime?.path).toBe(path.join(fakeHome, ".memroos"));
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
   it("reports size, existence, total footprint, and pressure", () => {
     const repo = tmpRepo();
     fs.mkdirSync(path.join(repo, "data"), { recursive: true });

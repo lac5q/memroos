@@ -35,6 +35,18 @@ describe("GET /api/write-rules/drift", () => {
     });
   });
 
+  it("returns 401 without agent auth", async () => {
+    const { authenticateAgentHeaders } = await import("@/lib/agent-registry");
+    vi.mocked(authenticateAgentHeaders).mockReturnValueOnce(null);
+    const res = await GET(new Request(`http://localhost/api/write-rules/drift?spaceId=${spaceId}&agentKnownVersion=1`) as never);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when spaceId is missing", async () => {
+    const res = await GET(new Request("http://localhost/api/write-rules/drift?agentKnownVersion=1") as never);
+    expect(res.status).toBe(400);
+  });
+
   it("returns 400 when agentKnownVersion missing", async () => {
     const req = new Request(`http://localhost/api/write-rules/drift?spaceId=${spaceId}`, {
       method: "GET",
@@ -42,6 +54,21 @@ describe("GET /api/write-rules/drift", () => {
     });
     const res = await GET(req as never);
     expect(res.status).toBe(400);
+  });
+
+  it("returns 500 when drift check throws", async () => {
+    const rules = await import("@/lib/write-rules");
+    vi.spyOn(rules, "checkWriteRuleDrift").mockImplementationOnce(() => {
+      throw new Error("drift failed");
+    });
+    const res = await GET(
+      new Request(`http://localhost/api/write-rules/drift?spaceId=${spaceId}&agentKnownVersion=1`, {
+        method: "GET",
+        headers: { authorization: "Bearer k" },
+      }) as never
+    );
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "drift failed" });
   });
 
   it("detects drift when agent version is stale", async () => {

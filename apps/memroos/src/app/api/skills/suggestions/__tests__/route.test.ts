@@ -47,6 +47,47 @@ describe("/api/skills/suggestions", () => {
     expect(body.suggestions).toHaveLength(1);
   });
 
+  it("GET persists suggestions when persist=1", async () => {
+    const res = await GET(new Request("http://localhost/api/skills/suggestions?persist=1&days=7") as never);
+    expect(res.status).toBe(200);
+    expect((await res.json()).ok).toBe(true);
+  });
+
+  it("PATCH returns 400 for invalid JSON and missing fields", async () => {
+    expect(
+      (
+        await PATCH(
+          new Request("http://localhost/api/skills/suggestions", {
+            method: "PATCH",
+            body: "{",
+          })
+        )
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await PATCH(
+          new Request("http://localhost/api/skills/suggestions", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: "s1", status: "invalid" }),
+          })
+        )
+      ).status
+    ).toBe(400);
+  });
+
+  it("PATCH returns 404 for unknown suggestion id", async () => {
+    const res = await PATCH(
+      new Request("http://localhost/api/skills/suggestions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "missing", status: "approved" }),
+      })
+    );
+    expect(res.status).toBe(404);
+  });
+
   it("PATCH returns 403 without operator auth", async () => {
     authorizeRegistryWrite.mockReturnValueOnce(false);
     const res = await PATCH(

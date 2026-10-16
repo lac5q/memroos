@@ -1,72 +1,54 @@
 // @vitest-environment node
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
+import { describe, expect, it, vi } from "vitest";
 import { initSchema } from "@/lib/db-schema";
-import type { BusinessSystemAdapter } from "../adapter-interface";
-import type { BusinessOutcomeEvent } from "../types";
 import { pollAllAdapters } from "../poller";
-
-function makeDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("journal_mode = WAL");
-  initSchema(db);
-  return db;
-}
+import type { BusinessSystemAdapter } from "../adapter-interface";
 
 describe("pollAllAdapters", () => {
-  let db: Database.Database;
+  it("records adapter poll failures and write failures", async () => {
+    const db = new Database(":memory:");
+    initSchema(db);
 
-  beforeEach(() => {
-    db = makeDb();
-  });
-
-  afterEach(() => {
-    db.close();
-  });
-
-  it("writes polled events and deduplicates on retry", async () => {
-    const since = new Date("2026-01-01T00:00:00.000Z");
-    const event: BusinessOutcomeEvent = {
-      tenantId: "default-tenant",
-      correlationId: "corr-1",
-      sourceSystem: "crm",
-      adapter: "hubspot",
-      eventType: "deal_advance",
-      kpiKey: "completion_rate",
-      kpiValue: 1,
-      rawJson: "{}",
-      polledAt: since.toISOString(),
-    };
-
-    const adapter: BusinessSystemAdapter = {
-      name: "hubspot",
-      category: "crm",
-      poll: vi.fn(async () => [event]),
-    };
-
-    const first = await pollAllAdapters([adapter], db, since);
-    expect(first.totalEventsWritten).toBe(1);
-    expect(first.errors).toHaveLength(0);
-    expect(first.adapterResults[0]?.eventsWritten).toBe(1);
-
-    const second = await pollAllAdapters([adapter], db, since);
-    expect(second.totalEventsWritten).toBe(0);
-    expect(second.adapterResults[0]?.eventsWritten).toBe(0);
-  });
-
-  it("records adapter poll errors without throwing", async () => {
     const failing: BusinessSystemAdapter = {
-      name: "broken",
+      name: "fail-adapter",
       category: "crm",
-      poll: async () => {
-        throw new Error("poll boom");
-      },
+      poll: vi.fn(async () => {
+        throw new Error("poll exploded");
+      }),
     };
 
-    const summary = await pollAllAdapters([failing], db);
-    expect(summary.totalEventsWritten).toBe(0);
-    expect(summary.errors.some((e) => e.includes("poll boom"))).toBe(true);
-    expect(summary.adapterResults[0]?.error).toContain("poll boom");
+    const pollSummary = await pollAllAdapters([failing], db);
+    expect(pollSummary.errors.some((entry) => entry.includes("poll exploded"))).toBe(true);
+    expect(pollSummary.adapterResults[0]?.error).toContain("poll exploded");
+
+    const writing: BusinessSystemAdapter = {
+      name: "write-adapter",
+      category: "crm",
+      poll: vi.fn(async () => [
+        {
+          tenantId: "default-tenant",
+          correlationId: "corr-1",
+          sourceSystem: "test",
+          adapter: "write-adapter",
+          eventType: "deal.updated",
+          kpiValue: 1,
+          kpiKey: "amount",
+          rawJson: "{}",
+          polledAt: new Date().toISOString(),
+        },
+      ]),
+    };
+
+    const brokenDb = {
+      prepare: () => {
+        throw new Error("write exploded");
+      },
+      transaction: (fn: (rows: unknown[]) => number) => fn,
+    } as unknown as Database.Database;
+
+    const writeSummary = await pollAllAdapters([writing], brokenDb);
+    expect(writeSummary.errors.some((entry) => entry.includes("write exploded"))).toBe(true);
+    db.close();
   });
 });

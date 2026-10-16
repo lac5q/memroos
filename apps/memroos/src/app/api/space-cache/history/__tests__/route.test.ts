@@ -27,6 +27,18 @@ describe("GET /api/space-cache/history", () => {
     invalidateSpace(testDb, { spaceId, actorId: "agent-1", reason: "test" });
   });
 
+  it("returns 401 without agent auth", async () => {
+    const { authenticateAgentHeaders } = await import("@/lib/agent-registry");
+    vi.mocked(authenticateAgentHeaders).mockReturnValueOnce(null);
+    const res = await GET(new Request(`http://localhost/api/space-cache/history?spaceId=${spaceId}`) as never);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when spaceId is missing", async () => {
+    const res = await GET(new Request("http://localhost/api/space-cache/history") as never);
+    expect(res.status).toBe(400);
+  });
+
   it("returns invalidation history", async () => {
     const res = await GET(new Request(`http://localhost/api/space-cache/history?spaceId=${spaceId}`) as never);
     expect(res.status).toBe(200);

@@ -50,6 +50,30 @@ describe("/api/shared-space", () => {
     expect(body.isShared).toBe(false);
   });
 
+  it("GET returns 500 when shared lookup throws", async () => {
+    const shared = await import("@/lib/shared-space");
+    vi.spyOn(shared, "isSpaceShared").mockImplementationOnce(() => {
+      throw new Error("db unavailable");
+    });
+    const res = await GET(new Request(`http://localhost/api/shared-space?spaceId=${spaceId}`) as never);
+    expect(res.status).toBe(500);
+  });
+
+  it("POST returns 400 when toggle throws", async () => {
+    const shared = await import("@/lib/shared-space");
+    vi.spyOn(shared, "setSpaceShared").mockImplementationOnce(() => {
+      throw new Error("invalid toggle");
+    });
+    const res = await POST(
+      new Request("http://localhost/api/shared-space", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId, isShared: true }),
+      }) as never
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("POST toggles shared state", async () => {
     const res = await POST(
       new Request("http://localhost/api/shared-space", {

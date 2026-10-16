@@ -139,6 +139,19 @@ describe("parsers", () => {
       const agents = await parseAgents(root);
       expect(agents[0].status).toBe("error");
     });
+
+    it("detects gemini/opencode/zcode/openclaw platforms", async () => {
+      for (const id of ["gemini-bot", "opencode-bot", "zcode-bot", "openclaw-bot"]) {
+        await mkdir(path.join(root, id));
+        await writeFile(path.join(root, id, "HEARTBEAT.md"), "ok\n");
+      }
+      const agents = await parseAgents(root);
+      const byId = Object.fromEntries(agents.map((a) => [a.id, a]));
+      expect(byId["gemini-bot"].platform).toBe("gemini");
+      expect(byId["opencode-bot"].platform).toBe("opencode");
+      expect(byId["zcode-bot"].platform).toBe("zcode");
+      expect(byId["openclaw-bot"].platform).toBe("openclaw");
+    });
   });
 
   describe("parseTokenStats", () => {

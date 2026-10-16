@@ -37,6 +37,33 @@ describe("POST /api/artifact-gate/prompt", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 400 when required fields are missing", async () => {
+    const res = await POST(
+      new Request("http://localhost/api/artifact-gate/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId }),
+      }) as never
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when promptSaveArtifact throws", async () => {
+    const gate = await import("@/lib/artifact-gate");
+    vi.spyOn(gate, "promptSaveArtifact").mockImplementationOnce(() => {
+      throw new Error("gate blocked");
+    });
+    const res = await POST(
+      new Request("http://localhost/api/artifact-gate/prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spaceId, artifactName: "x", artifactType: "doc" }),
+      }) as never
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "gate blocked" });
+  });
+
   it("returns prompt payload for valid input", async () => {
     const res = await POST(
       new Request("http://localhost/api/artifact-gate/prompt", {

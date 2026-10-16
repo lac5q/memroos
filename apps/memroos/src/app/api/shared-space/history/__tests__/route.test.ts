@@ -25,7 +25,10 @@ describe("GET /api/shared-space/history", () => {
 
   beforeEach(() => {
     vi.mocked(authenticateAgentHeaders).mockReturnValue({ id: "agent-1" } as never);
-    spaceId = createSpace(testDb, { tenantId: "default-tenant", name: `hist-${Date.now()}` }).id;
+    spaceId = createSpace(testDb, {
+      tenantId: "default-tenant",
+      name: `hist-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    }).id;
     setSpaceShared(testDb, { spaceId, isShared: true, actorId: "agent-1" });
   });
 
@@ -33,6 +36,11 @@ describe("GET /api/shared-space/history", () => {
     vi.mocked(authenticateAgentHeaders).mockReturnValueOnce(null);
     const res = await GET(new Request(`http://localhost/api/shared-space/history?spaceId=${spaceId}`) as never);
     expect(res.status).toBe(401);
+  });
+
+  it("returns 400 when spaceId is missing", async () => {
+    const res = await GET(new Request("http://localhost/api/shared-space/history") as never);
+    expect(res.status).toBe(400);
   });
 
   it("returns toggle history", async () => {
