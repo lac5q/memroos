@@ -298,6 +298,28 @@ describe("memory lifecycle audit chain (VAL-MEM-029)", () => {
     expect(memoryAuditEntryHash(different)).not.toBe(h1);
   });
 
+  it("verifyMemoryAuditChainWithFault detects missing entryHash", () => {
+    const database = freshDb();
+    writeChainedMemoryAuditEntry(database, {
+      tenantId: "default-tenant",
+      actorId: "operator",
+      actorRole: "operator",
+      eventType: "memory.consolidation.run",
+      entityType: "memory_consolidation",
+      entityId: "consolidation_run:missing-hash",
+      reason: "consolidation_completed",
+      metadata: { run_id: "missing-hash" },
+      createdAt: "2026-07-01T00:00:00.000Z",
+    });
+
+    const result = verifyMemoryAuditChainWithFault(database, "default-tenant", (_row, metadata) => {
+      const { entryHash: _drop, ...rest } = metadata;
+      return rest;
+    });
+    expect(result.valid).toBe(false);
+    expect(result.reason).toBe("missing entryHash");
+  });
+
   it("buildMemoryAuditEntry rejects empty tenantId", () => {
     const database = freshDb();
     expect(() =>

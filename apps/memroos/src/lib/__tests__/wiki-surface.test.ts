@@ -86,6 +86,20 @@ describe("wiki-vault", () => {
     expect(wikiRootExists(wikiRoot)).toBe(true);
   });
 
+  it("ignores unreadable pages while searching", () => {
+    const kb = makeVault();
+    const wikiRoot = getWikiRoot({ knowledgeBasePath: kb });
+    const unreadable = path.join(wikiRoot, "memroos-digest", "locked.md");
+    fs.writeFileSync(unreadable, "# Locked\nsecret phrase\n", "utf8");
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      expect(readWikiPage(wikiRoot, "memroos-digest/locked.md")).toBeNull();
+      expect(searchWikiPages(wikiRoot, "secret phrase")).toEqual([]);
+    } finally {
+      fs.chmodSync(unreadable, 0o644);
+    }
+  });
+
   it("loads wiki graph and degrades when missing", () => {
     const kb = makeVault();
     const graph = loadWikiGraph({ knowledgeBasePath: kb });

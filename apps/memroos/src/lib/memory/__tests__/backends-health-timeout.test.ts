@@ -232,6 +232,36 @@ describe("checkVectorHealth timeout honesty", () => {
     expect(message).toContain("search offline");
   });
 
+  it("searchVectorMemory uses recent query fallback when search text is empty", async () => {
+    vi.spyOn(registry, "getAdapters").mockImplementation(() => []);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain("q=recent");
+        return Response.json({ results: [] });
+      }),
+    );
+    await searchVectorMemory("", 5);
+  });
+
+  it("marks vector degraded on mem0 disk warning without home-advisory alone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          queue: { queued: 0 },
+          memory_runtime: { status: "available" },
+          disk: { warning: true, critical: false },
+        }),
+      ),
+    );
+    const health = await checkVectorHealth();
+    expect(health.status).toBe("up");
+    expect(String(health.detail ?? "")).toMatch(/disk warning/);
+  });
+
   it("queryGraphMemory and checkGraphHealth use the direct Neo4j HTTP path when no adapter is registered", async () => {
     const getAdaptersSpy = vi.spyOn(registry, "getAdapters").mockReturnValue([]);
     process.env.NEO4J_PASSWORD = "test-graph-pass";

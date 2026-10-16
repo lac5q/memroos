@@ -390,6 +390,23 @@ describe("POST /api/apo validation and errors", () => {
     expect(body.stats.archivedProposals).toBe(1);
   });
 
+  it("archived tracking tolerates corrupt approval sidecar JSON", async () => {
+    const { GET, POST } = await loadRoute();
+    await POST(makeApproveRequest({ action: "approve", proposalId: proposalFilename }));
+    const approvedPath = path.join(proposalsPath, "approved", proposalFilename);
+    const archivedDir = path.join(proposalsPath, "archived");
+    mkdirSync(archivedDir, { recursive: true });
+    writeFileSync(path.join(archivedDir, proposalFilename), readFileSync(approvedPath, "utf-8"));
+    writeFileSync(path.join(archivedDir, `${proposalFilename}.json`), "{not-json");
+    rmSync(`${approvedPath}.json`, { force: true });
+    rmSync(approvedPath, { force: true });
+
+    const archived = (await (await GET()).json()).proposals.find(
+      (p: { status: string }) => p.status === "archived",
+    );
+    expect(archived?.tracking?.phase).toBe("implemented");
+  });
+
   it("archived tracking falls back when approval sidecar JSON is missing", async () => {
     const { GET, POST } = await loadRoute();
     await POST(makeApproveRequest({ action: "approve", proposalId: proposalFilename }));

@@ -67,6 +67,19 @@ describe("graph-catchup projection mapping", () => {
     expect(item.source).toBe("episodic");
   });
 
+  it("normalizeVectorMemoryRaw unwraps Qdrant payload objects", () => {
+    const normalized = graphCatchupModule.normalizeVectorMemoryRaw({
+      id: "qdrant-1",
+      payload: { text: "nested payload", user_id: "agent-y" },
+    });
+    expect(normalized).toMatchObject({
+      id: "qdrant-1",
+      text: "nested payload",
+      user_id: "agent-y",
+    });
+    expect(graphCatchupModule.normalizeVectorMemoryRaw(null)).toBeNull();
+  });
+
   it("mapVectorMemoryToProjection accepts text and metadata.saved_by_agent", () => {
     const mapped = mapVectorMemoryToProjection({
       memory_id: "mid-1",

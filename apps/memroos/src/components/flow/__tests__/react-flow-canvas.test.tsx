@@ -128,6 +128,39 @@ describe("ReactFlowCanvas", () => {
     groupNode?.data.onToggleCollapse?.();
   });
 
+  it("renders qwen-specific icons and maps non-active agents to dormant nodes", () => {
+    render(
+      <ReactFlowCanvas
+        services={[{ service: "Agents", status: "degraded" }]}
+        agentCount={1}
+        activeCount={0}
+        memoryCount={0}
+        knowledgeCount={0}
+        skillCount={0}
+        nodeActivity={{}}
+        registeredAgents={[
+          {
+            id: "qwen-1",
+            name: "Qwen Worker",
+            status: "error",
+            latencyMs: 400,
+            location: "remote",
+            protocol: "rest",
+            platform: "qwen",
+            currentTask: "repair",
+          },
+        ]}
+        onNodeClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Qwen Worker")).toBeInTheDocument();
+    const agentNode = (
+      captured.lastNodes as Array<{ id: string; data: { icon?: string; status?: string } }>
+    ).find((node) => node.id === "agent-qwen-1");
+    expect(agentNode?.data.icon).toBe("Qw");
+    expect(agentNode?.data.status).toBe("dormant");
+  });
+
   it("renders topology without registered agents", () => {
     render(
       <ReactFlowCanvas

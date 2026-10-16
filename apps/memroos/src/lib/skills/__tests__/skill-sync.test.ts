@@ -1056,8 +1056,15 @@ describe("checkSync and sync state helpers", () => {
   });
 
   it("requireHarness rejects unsupported harness identifiers", async () => {
-    const { requireHarness } = await import("../skill-sync");
+    const { requireHarness, SkillSyncError } = await import("../skill-sync");
     expect(() => requireHarness("unknown-harness")).toThrow(/Unsupported source_harness/);
+    expect(() => requireHarness(42 as unknown as string)).toThrow(SkillSyncError);
+    try {
+      requireHarness("");
+    } catch (error) {
+      expect(error).toBeInstanceOf(SkillSyncError);
+      expect((error as Error).name).toBe("SkillSyncError");
+    }
   });
 });
 
@@ -1118,6 +1125,31 @@ describe("approveSyncProposalById and rejectSyncProposalById", () => {
         proposal_id: proposal.pending_proposal_id!,
         operator: "alice",
         expected_updated_at: "2020-01-01T00:00:00.000Z",
+      })
+    ).toThrow(SkillSyncError);
+  });
+
+  it("rejectSyncProposalById rejects stale expected_updated_at tokens", async () => {
+    const { createImportProposal, rejectSyncProposalById, SkillSyncError } = await import(
+      "../skill-sync"
+    );
+    insertSkillRow({ name: "reject-stale", content_hash: "0".repeat(64) });
+    const { proposal } = createImportProposal(db, {
+      source_harness: "claude",
+      proposed_by: "scanner",
+      detected: {
+        skill_name: "reject-stale",
+        source_harness: "claude",
+        content_hash: "1".repeat(64),
+        raw_body: VALID_SKILL_MD("reject-stale", "2.0.0"),
+      },
+    });
+    expect(() =>
+      rejectSyncProposalById(db, {
+        proposal_id: proposal.pending_proposal_id!,
+        operator: "alice",
+        reason: "no",
+        expected_updated_at: "1999-01-01T00:00:00.000Z",
       })
     ).toThrow(SkillSyncError);
   });

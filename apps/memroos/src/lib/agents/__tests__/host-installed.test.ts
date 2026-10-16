@@ -53,6 +53,30 @@ describe("detectInstalledHarnesses", () => {
     ).toEqual([]);
   });
 
+  it("tolerates missing binaries and version probe failures", () => {
+    existsSync.mockImplementation((p: string) => p.endsWith("/.claude"));
+    execFileSync.mockImplementation((cmd: string) => {
+      if (cmd === "which") return "/usr/local/bin/claude\n";
+      throw new Error("version failed");
+    });
+
+    const found = detectInstalledHarnesses({
+      hostId: "host-d",
+      homeDir: "/home/op",
+      skipVersions: false,
+    });
+
+    expect(found.some((h) => h.id === "host-d:claude" && h.version === null)).toBe(true);
+
+    execFileSync.mockImplementation((cmd: string) => {
+      if (cmd === "which") throw new Error("missing");
+      return "";
+    });
+    expect(
+      detectInstalledHarnesses({ hostId: "host-e", homeDir: "/home/op", skipVersions: true })
+    ).toEqual([]);
+  });
+
   it("detects Hermes runtime directory without binary", () => {
     existsSync.mockImplementation((p: string) => p.endsWith("/.hermes/hermes-agent"));
     execFileSync.mockReturnValue("");

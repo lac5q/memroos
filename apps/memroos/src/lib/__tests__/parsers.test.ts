@@ -147,6 +147,20 @@ describe("parsers", () => {
       await expect(parseClaudeMemory(root)).resolves.toEqual([]);
     });
 
+    it("maps known directory names to restaurant-themed roles", async () => {
+      const agentDir = path.join(root, "founding-engineer");
+      await mkdir(agentDir);
+      await writeFile(path.join(agentDir, "HEARTBEAT.md"), "all good\n");
+      const agents = await parseAgents(root);
+      expect(agents[0].role).toBe("Line Cook");
+    });
+
+    it("marks agents without heartbeat files as dormant", async () => {
+      await mkdir(path.join(root, "silent-agent"));
+      const agents = await parseAgents(root);
+      expect(agents[0]).toMatchObject({ id: "silent-agent", status: "dormant" });
+    });
+
     it("detects gemini/opencode/zcode/openclaw platforms", async () => {
       for (const id of ["gemini-bot", "opencode-bot", "zcode-bot", "openclaw-bot"]) {
         await mkdir(path.join(root, id));
@@ -175,6 +189,17 @@ describe("parsers", () => {
       const stats = parseTokenStats();
       expect(stats?.totalInput).toBe(2_500_000_000);
       expect(stats?.totalOutput).toBe(900);
+    });
+
+    it("honors RTK_STATS_TIMEOUT_MS when invoking rtk gain", () => {
+      process.env.RTK_STATS_TIMEOUT_MS = "2500";
+      vi.mocked(execFileSync).mockReturnValue("Input tokens: 1K\n");
+      parseTokenStats();
+      expect(execFileSync).toHaveBeenCalledWith("rtk", ["gain"], {
+        encoding: "utf-8",
+        timeout: 2500,
+      });
+      delete process.env.RTK_STATS_TIMEOUT_MS;
     });
 
     it("parses rtk gain summary and command breakdown", () => {

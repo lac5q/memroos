@@ -7,6 +7,7 @@ import {
   createRetentionPolicy,
   evaluateRetentionDeadline,
   evaluateRetentionPolicy,
+  listRetentionReceipts,
   registerRetentionRecord,
 } from "../retention-policy";
 
@@ -189,5 +190,32 @@ describe("memory retention policy selection", () => {
     });
 
     expect(evaluation.decision).toBe("policy_unavailable");
+  });
+
+  it("lists retention receipts filtered by record id and run key", () => {
+    const database = freshDb();
+    createRetentionPolicy(database, {
+      id: "policy-list",
+      name: "list receipts",
+      ontologyType: "memory.note",
+      securityLabel: { sensitivity: "internal" },
+      purpose: "recall",
+      scope: { tenantId: "default-tenant", project: "alpha" },
+      priority: 1,
+      durationDays: 7,
+      actorId: "operator-1",
+    });
+    registerRetentionRecord(database, {
+      recordType: "message",
+      recordId: "msg-list",
+      ontologyType: "memory.note",
+      securityLabel: { sensitivity: "internal" },
+      purpose: "recall",
+      scope: { tenantId: "default-tenant", project: "alpha" },
+      actorId: "operator-1",
+    });
+    const receipts = listRetentionReceipts(database, { recordId: "msg-list", limit: 5 });
+    expect(receipts.length).toBeGreaterThan(0);
+    expect(receipts[0]?.recordId).toBe("msg-list");
   });
 });

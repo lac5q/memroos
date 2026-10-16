@@ -297,6 +297,33 @@ describe("Erasure helpers and authorization", () => {
     ).rejects.toBeInstanceOf(ErasureAuthorizationError);
   });
 
+  it("ErasureAuthorizationError exposes typed codes for scope failures", async () => {
+    const db = new Database(":memory:");
+    const identity = buildCanonicalIdentity("x", "t", "ingress", "vector", { tenantId: "t1" });
+    try {
+      await coordinateErasure(db, identity, { tenantId: "t1", actorId: "a", scope: {} });
+      throw new Error("expected missing_scope");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ErasureAuthorizationError);
+      expect((error as ErasureAuthorizationError).code).toBe("missing_scope");
+      expect((error as ErasureAuthorizationError).name).toBe("ErasureAuthorizationError");
+    }
+    try {
+      await coordinateErasure(db, identity, {
+        tenantId: "t1",
+        actorId: "a",
+        scope: { tenantId: "   " },
+      });
+      throw new Error("expected missing_tenant");
+    } catch (error) {
+      expect((error as ErasureAuthorizationError).code).toBe("missing_tenant");
+    }
+  });
+
+  it("deriveErasureId returns the documented erasure_<sha256> format", () => {
+    expect(deriveErasureId("tenant-z", "canon-9")).toMatch(/^erasure_[a-f0-9]{64}$/);
+  });
+
   it("throws when canonical identity tenant disagrees with scope tenant", async () => {
     const db = new Database(":memory:");
     const identity = buildCanonicalIdentity("x", "t", "ingress", "vector", { tenantId: "tenant-a" });
