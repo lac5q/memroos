@@ -60,6 +60,22 @@ describe("GET /api/model-usage", () => {
     expect(parseModelUsage).toHaveBeenCalledWith(expect.any(Date));
   });
 
+  it("serves cached usage for repeated requests within ttl", async () => {
+    vi.stubEnv("MODEL_USAGE_CACHE_TTL_MS", "60000");
+    parseModelUsage.mockResolvedValue({
+      models: [{ id: "claude", name: "Claude", inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0, requests: 1, totalTokens: 1 }],
+      total: { inputTokens: 1, outputTokens: 0, cacheRead: 0, cacheCreation: 0, requests: 1 },
+    });
+    const { GET } = await import("../route");
+    const req = new NextRequest("http://localhost/api/model-usage");
+    await GET(req);
+    parseModelUsage.mockClear();
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    expect(parseModelUsage).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
+  });
+
   it("returns 500 when parsing throws", async () => {
     parseModelUsage.mockRejectedValue(new Error("parse failed"));
     const { GET } = await import("../route");

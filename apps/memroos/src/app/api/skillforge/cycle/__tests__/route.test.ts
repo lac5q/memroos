@@ -46,4 +46,11 @@ describe("POST /api/skillforge/cycle", () => {
     expect(res.status).toBe(200);
     expect((await res.json()).ok).toBe(true);
   });
+
+  it("returns 500 when the cycle throws", async () => {
+    runSkillCycle.mockRejectedValueOnce(new Error("cycle failed"));
+    const res = await POST(new Request("http://localhost/api/skillforge/cycle", { method: "POST" }) as never);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "cycle failed" });
+  });
 });

@@ -55,6 +55,26 @@ describe("GET /api/activity", () => {
     expect(data.events.length).toBeLessThanOrEqual(20);
   });
 
+  it("classifies lowercase error log lines", async () => {
+    readFile.mockResolvedValue("2026-01-15T10:00:00 soft error in pipeline\n");
+    readdir.mockRejectedValue(new Error("no agents"));
+    const res = await GET();
+    const data = await res.json();
+    expect(data.events.some((e: { type: string }) => e.type === "error")).toBe(true);
+  });
+
+  it("formats heartbeats older than five minutes with minute counts", async () => {
+    readFile.mockRejectedValue(new Error("no log"));
+    readdir.mockImplementation(async (dir: string) => {
+      if (String(dir).includes("proposals")) return [];
+      return ["ceo"];
+    });
+    stat.mockResolvedValue({ mtime: new Date(Date.now() - 10 * 60 * 1000) });
+    const res = await GET();
+    const data = await res.json();
+    expect(data.events.some((e: { message: string }) => /\d+m ago/.test(e.message))).toBe(true);
+  });
+
   it("includes recent agent heartbeats and pending proposals", async () => {
     readFile.mockRejectedValue(new Error("no log"));
     readdir.mockImplementation(async (dir: string) => {

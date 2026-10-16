@@ -47,4 +47,14 @@ describe("GET /api/skillforge/status", () => {
     expect(body.lastStatus).toBe("idle");
     expect(body.config.batchSize).toBe(5);
   });
+
+  it("returns 500 when database access throws", async () => {
+    const dbModule = await import("@/lib/db");
+    vi.spyOn(dbModule, "getDb").mockImplementationOnce(() => {
+      throw new Error("db unavailable");
+    });
+    const res = await GET(new Request("http://localhost/api/skillforge/status") as never);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "db unavailable" });
+  });
 });

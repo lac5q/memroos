@@ -59,6 +59,18 @@ describe("POST /api/l3/poll", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 500 when polling throws", async () => {
+    pollAllAdaptersMock.mockRejectedValueOnce(new Error("poll failed"));
+    const req = new Request("http://localhost/api/l3/poll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adapters: ["hubspot"] }),
+    });
+    const res = await POST(req as never);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: "poll failed" });
+  });
+
   it("runs pollAllAdapters for matching adapters", async () => {
     const req = new Request("http://localhost/api/l3/poll", {
       method: "POST",

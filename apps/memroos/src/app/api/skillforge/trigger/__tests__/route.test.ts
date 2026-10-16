@@ -56,4 +56,13 @@ describe("POST /api/skillforge/trigger", () => {
     expect(body.success).toBe(true);
     expect(body.runId).toBe("run-1");
   });
+
+  it("returns 500 when database access throws", async () => {
+    const dbModule = await import("@/lib/db");
+    vi.spyOn(dbModule, "getDb").mockImplementationOnce(() => {
+      throw new Error("db unavailable");
+    });
+    const res = await POST(new Request("http://localhost/api/skillforge/trigger", { method: "POST" }) as never);
+    expect(res.status).toBe(500);
+  });
 });

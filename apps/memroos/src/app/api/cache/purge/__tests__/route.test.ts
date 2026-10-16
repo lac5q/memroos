@@ -27,6 +27,33 @@ describe("POST /api/cache/purge", () => {
     expect(invalidateTag).toHaveBeenCalledWith("memory");
   });
 
+  it("purges the full cache when tag is whitespace-only", async () => {
+    const res = await POST(
+      new Request("http://localhost/api/cache/purge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tag: "   " }),
+      }) as never
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, purged: 5, tag: null });
+    expect(purge).toHaveBeenCalled();
+  });
+
+  it("returns 500 when cache invalidation throws", async () => {
+    invalidateTag.mockImplementationOnce(() => {
+      throw new Error("cache backend down");
+    });
+    const res = await POST(
+      new Request("http://localhost/api/cache/purge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tag: "memory" }),
+      }) as never
+    );
+    expect(res.status).toBe(500);
+  });
+
   it("purges the full cache when tag is omitted", async () => {
     const res = await POST(
       new Request("http://localhost/api/cache/purge", {

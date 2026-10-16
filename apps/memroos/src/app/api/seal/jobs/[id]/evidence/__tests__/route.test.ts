@@ -28,6 +28,14 @@ describe("GET /api/seal/jobs/[id]/evidence", () => {
     getJobEvidence.mockReset();
   });
 
+  it("returns 401 without a session", async () => {
+    authenticateUser.mockResolvedValueOnce(null);
+    const res = await GET(new Request("http://localhost/api/seal/jobs/job-1/evidence") as never, {
+      params: Promise.resolve({ id: "job-1" }),
+    });
+    expect(res.status).toBe(401);
+  });
+
   it("returns 404 when evidence not yet available", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "u1",

@@ -25,6 +25,22 @@ describe("CacheHealthPanel", () => {
     expect(container.querySelector(".animate-spin")).toBeTruthy();
   });
 
+  it("shows budget risk when performance budgets fail", () => {
+    api.useCacheStats.mockReturnValue({
+      isLoading: false,
+      data: {
+        stats: { entries: 1, hits: 1, misses: 9, memoryBytes: 512, invalidations: 0 },
+        performance: {
+          ok: false,
+          routes: [{ route: "/api/memory", p95Ms: 120, budgetMs: 50, status: "fail" }],
+        },
+      },
+    });
+    render(<CacheHealthPanel />);
+    expect(screen.getByText("budget risk")).toBeInTheDocument();
+    expect(screen.getByText(/p95 120ms/)).toBeInTheDocument();
+  });
+
   it("renders cache stats and purge control", () => {
     const mutate = vi.fn();
     api.usePurgeCacheMutation.mockReturnValue({ mutate, isPending: false });

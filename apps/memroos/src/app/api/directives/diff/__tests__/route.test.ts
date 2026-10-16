@@ -10,10 +10,11 @@ vi.mock("@/lib/auth/session", () => ({
 
 const { GET } = await import("../route");
 
-function makeDiffRequest(body: unknown | null): NextRequest {
+function makeDiffRequest(body: unknown | null, init: { headers?: HeadersInit } = {}): NextRequest {
   const nextUrl = new URL("http://localhost/api/directives/diff");
   return {
     nextUrl,
+    headers: new Headers(init.headers),
     json: async () => {
       if (body === null) throw new Error("no body");
       return body;
@@ -50,6 +51,34 @@ describe("GET /api/directives/diff", () => {
     expect(body.ok).toBe(true);
     expect(body.diff.identical).toBe(false);
     expect(body.message).toContain("drift");
+  });
+
+  it("returns 401 when session is missing and no bearer key is provided", async () => {
+    mockAuthenticateUser.mockResolvedValueOnce(null);
+    const res = await GET(
+      makeDiffRequest({ local: "a", canonical: "b" })
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("authorizes operator api keys for diff requests", async () => {
+    mockAuthenticateUser.mockResolvedValueOnce(null);
+    process.env.MEMROOS_OPERATOR_API_KEY = "operator-secret";
+    const nextUrl = new URL("http://localhost/api/directives/diff");
+    const res = await GET({
+      nextUrl,
+      headers: new Headers({ authorization: "Bearer operator-secret" }),
+      json: async () => ({ local: "a\n", canonical: "a\n" }),
+    } as unknown as NextRequest);
+    expect(res.status).toBe(200);
+    delete process.env.MEMROOS_OPERATOR_API_KEY;
+  });
+
+  it("returns validation errors for oversized directive payloads", async () => {
+    const res = await GET(makeDiffRequest({ local: "x".repeat(3_000_000), canonical: "y" }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("validation failed");
   });
 
   it("reports identical texts", async () => {

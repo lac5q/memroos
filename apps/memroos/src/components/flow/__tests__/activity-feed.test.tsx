@@ -41,4 +41,24 @@ describe("ActivityFeed", () => {
     fireEvent.mouseEnter(screen.getByText("mem0"));
     expect(onNodeHover).toHaveBeenCalledWith("mem0");
   });
+
+  it("renders error severity events with warn styling", () => {
+    render(
+      <ActivityFeed
+        events={[
+          {
+            id: "err-1",
+            timestamp: new Date().toISOString(),
+            node: "agents",
+            type: "error",
+            message: "Pipeline failed",
+            severity: "error",
+          },
+        ]}
+      />
+    );
+    expect(screen.getByText("Pipeline failed")).toBeInTheDocument();
+    expect(screen.getByText("agents")).toHaveStyle({ color: "#f43f5e" });
+    expect(screen.getByText("⚠️")).toBeInTheDocument();
+  });
 });
