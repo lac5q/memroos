@@ -1157,6 +1157,58 @@ describe("pin lookup helpers and agent-scoped rollback", () => {
     ).toThrow(SyncGovernanceError);
   });
 
+  it("rollbackAgentVersionPin rejects invalid pin_id values", async () => {
+    const { rollbackAgentVersionPin, SyncGovernanceError } = await importSyncModule();
+    expect(() => rollbackAgentVersionPin(db, { pin_id: 0, operator: "alice" })).toThrow(
+      SyncGovernanceError
+    );
+    expect(() => rollbackAgentVersionPin(db, { pin_id: -3, operator: "alice" })).toThrow(
+      /positive integer/
+    );
+  });
+
+  it("rollbackAgentVersionPinByAgent fails when prior registry hash does not match pin", async () => {
+    const {
+      createOrUpdateAgentVersionPin,
+      rollbackAgentVersionPinByAgent,
+      SyncGovernanceError,
+    } = await importSyncModule();
+    insertAgent("tamper-agent", "Tamper Agent");
+    const priorId = insertSkillRow({
+      name: "tamper-prior",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      content_hash: "1".repeat(64),
+    });
+    const currentId = insertSkillRow({
+      name: "tamper-current",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      content_hash: "2".repeat(64),
+    });
+    createOrUpdateAgentVersionPin(db, {
+      agent_id: "tamper-agent",
+      skill_name: "tamper-skill",
+      skill_id: currentId,
+      current_version: "2.0.0",
+      current_content_hash: "2".repeat(64),
+      actor: "alice",
+    });
+    db.prepare(
+      `UPDATE skill_version_pins
+          SET prior_version = ?, prior_content_hash = ?, prior_skill_id = ?
+        WHERE agent_id = ? AND skill_name = ?`
+    ).run("1.0.0", "f".repeat(64), priorId, "tamper-agent", "tamper-skill");
+    expect(() =>
+      rollbackAgentVersionPinByAgent(db, {
+        agent_id: "tamper-agent",
+        skill_name: "tamper-skill",
+        operator: "alice",
+        reason: "hash mismatch",
+      })
+    ).toThrow(/tampering suspected/);
+  });
+
   it("approveImportProposal refuses unknown proposals and double approval", async () => {
     const { detectSkillChange, approveImportProposal, SyncGovernanceError } = await importSyncModule();
     expect(() => approveImportProposal(db, "missing-id", "alice", "ok")).toThrow(SyncGovernanceError);

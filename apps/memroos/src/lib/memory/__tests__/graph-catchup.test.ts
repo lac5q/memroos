@@ -8,10 +8,14 @@ import { initSchema } from "@/lib/db-schema";
 import { listCronHealthJobs } from "@/lib/cron-health";
 import {
   GRAPH_CATCHUP_CRON_ID,
+  buildMemoryFactMergeCypher,
+  countNeo4jNodes,
   isAfterVectorCursor,
   isNeo4jConfigured,
+  mapEpisodicMessageToProjection,
   mapVectorMemoryToProjection,
   normalizeVectorMemoryPoint,
+  projectMemoryFact,
   projectMemoryToGraph,
   readGraphCatchupCheckpoint,
   runGraphCatchup,
@@ -42,6 +46,57 @@ afterEach(() => {
 });
 
 describe("graph-catchup projection mapping", () => {
+  it("buildMemoryFactMergeCypher includes MemoryFact MERGE fields", () => {
+    const cypher = buildMemoryFactMergeCypher();
+    expect(cypher).toContain("MERGE (n:MemoryFact");
+    expect(cypher).toContain("projectedBy");
+  });
+
+  it("mapEpisodicMessageToProjection prefixes ids and truncates content", () => {
+    const item = mapEpisodicMessageToProjection({
+      id: 99,
+      content: "x".repeat(9000),
+      agent_id: "luis",
+      timestamp: "2026-07-17T10:00:00.000Z",
+    });
+    expect(item.id).toBe("episodic:99");
+    expect(item.content.length).toBe(8000);
+    expect(item.source).toBe("episodic");
+  });
+
+  it("mapVectorMemoryToProjection accepts text and metadata.saved_by_agent", () => {
+    const mapped = mapVectorMemoryToProjection({
+      memory_id: "mid-1",
+      text: "Vector text field content.",
+      metadata: { saved_by_agent: "agent-x" },
+      ingested_at: "2026-07-17T09:00:00.000Z",
+    });
+    expect(mapped).toMatchObject({
+      id: "vector:mid-1",
+      agentId: "agent-x",
+      source: "vector",
+    });
+  });
+
+  it("projectMemoryFact dry_run skips Neo4j I/O", async () => {
+    const result = await projectMemoryFact(
+      {
+        id: "episodic:1",
+        content: "dry run fact",
+        source: "episodic",
+      },
+      { dryRun: true }
+    );
+    expect(result).toBe("dry_run");
+  });
+
+  it("countNeo4jNodes parses queryFn responses", async () => {
+    const count = await countNeo4jNodes(async () => ({
+      results: [{ data: [{ row: [42] }] }],
+    }));
+    expect(count).toBe(42);
+  });
+
   it("normalizes Qdrant scroll payloads into vector memory points", () => {
     const point = normalizeVectorMemoryPoint({
       id: "abc-123",
@@ -690,6 +745,74 @@ describe("graph-catchup incremental checkpointing", () => {
     expect(summary.status).toBe("completed");
     expect(summary.projected).toBe(2);
     expect(seen).toEqual(["vector:max-1", "vector:max-2"]);
+  });
+
+  it("returns failed when every episodic projection errors and none succeed", async () => {
+    process.env.NEO4J_PASSWORD = "test-secret";
+    testDb
+      .prepare(
+        `INSERT INTO messages (session_id, project, agent_id, role, content, timestamp)
+         VALUES ('s1', 'p1', 'luis', 'user', 'Only failure memory.', '2026-07-17T10:00:00.000Z')`
+      )
+      .run();
+    const summary = await runGraphCatchup(testDb, {
+      skipVector: true,
+      now: new Date("2026-07-17T12:00:00.000Z"),
+      projectFact: async () => {
+        throw new Error("only_failures");
+      },
+      sleep: async () => undefined,
+      log: () => undefined,
+    });
+    expect(summary.status).toBe("failed");
+    expect(summary.projected).toBe(0);
+    expect(summary.errors).toBe(1);
+  });
+
+  it("skips vector rows at or before the incremental cursor", async () => {
+    process.env.NEO4J_PASSWORD = "test-secret";
+    process.env.QDRANT_URL = "http://qdrant.test";
+    writeGraphCatchupCheckpoint(testDb, {
+      id: "default",
+      episodicLastId: 0,
+      vectorLastCreatedAt: "2026-07-17T11:00:00.000Z",
+      vectorLastId: "cursor-id",
+      updatedAt: "2026-07-17T11:00:00.000Z",
+    });
+    const seen: string[] = [];
+    const summary = await runGraphCatchup(testDb, {
+      oneshot: false,
+      skipEpisodic: true,
+      now: new Date("2026-07-17T12:00:00.000Z"),
+      fetchVectorPage: async () => ({
+        items: [
+          {
+            id: "older",
+            payload: {
+              data: "Before cursor.",
+              user_id: "luis",
+              created_at: "2026-07-17T10:00:00.000Z",
+            },
+          },
+          {
+            id: "after",
+            payload: {
+              data: "After cursor.",
+              user_id: "luis",
+              created_at: "2026-07-17T12:00:00.000Z",
+            },
+          },
+        ],
+        nextCursor: null,
+      }),
+      projectFact: async (item) => {
+        seen.push(item.id);
+      },
+      sleep: async () => undefined,
+      log: () => undefined,
+    });
+    expect(summary.skipped).toBeGreaterThanOrEqual(1);
+    expect(seen).toEqual(["vector:after"]);
   });
 
   it("skips empty episodic content and pages oneshot across batches", async () => {

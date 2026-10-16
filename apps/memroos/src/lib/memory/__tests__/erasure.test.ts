@@ -473,6 +473,26 @@ describe("coordinateErasure idempotency and scope", () => {
     bare.close();
   });
 
+  it("marks overall status incomplete when a linked store adapter is unavailable", async () => {
+    const identity = buildCanonicalIdentity("graph only", "graph", "ingress", "graph", {
+      tenantId: "tenant1",
+    });
+    const prev = process.env.NEO4J_PASSWORD;
+    delete process.env.NEO4J_PASSWORD;
+    try {
+      const report = await coordinateErasure(db, identity, {
+        tenantId: "tenant1",
+        actorId: "actor1",
+        scope: { tenantId: "tenant1" },
+      });
+      expect(report.status).toBe("incomplete");
+      expect(report.storeOutcomes.find((o) => o.storeId === "graph")?.status).toBe("unavailable");
+    } finally {
+      if (prev === undefined) delete process.env.NEO4J_PASSWORD;
+      else process.env.NEO4J_PASSWORD = prev;
+    }
+  });
+
   it("traverseIndirectDerivatives includes snapshot rows from embedding provenance", () => {
     db.exec(`
       CREATE TABLE memory_embedding_provenance (
