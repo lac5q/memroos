@@ -359,6 +359,36 @@ describe("VoicePanel", () => {
     expect(screen.getByRole("option", { name: "Codex CLI - Agent" })).toBeInTheDocument();
   });
 
+  it("labels dedicated Gemini and Cursor CLI identities", () => {
+    mockUseAgents.mockReturnValue({
+      data: {
+        agents: [
+          {
+            id: "gemini-senior-engineer",
+            name: "Gemini Engineer",
+            role: "Gemini CLI identity",
+            company: null,
+            platform: "gemini",
+            protocol: "local",
+            metadata: { source: "registry" },
+          },
+          {
+            id: "cursor-ide-agent",
+            name: "Cursor Agent",
+            role: "Cursor IDE identity",
+            company: null,
+            platform: "cursor",
+            protocol: "local",
+            metadata: { source: "registry" },
+          },
+        ],
+      },
+    } as ReturnType<typeof useAgents>);
+    render(<VoicePanel />);
+    expect(screen.getByRole("option", { name: "Gemini CLI - Senior Engineer" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Cursor IDE - Agent" })).toBeInTheDocument();
+  });
+
   it("surfaces generic chat errors from non-streaming failures", async () => {
     vi.stubGlobal(
       "fetch",

@@ -114,6 +114,55 @@ describe("Phase 179 vault write/read for tool connections", () => {
   });
 });
 
+describe("Phase 179 OAuth + API key reads", () => {
+  it("stores OAuth connections and reads API keys back", async () => {
+    const store = await importStore();
+    const oauth = await store.storeOAuthConnection({
+      providerKey: "slack",
+      nangoConnectionId: "conn-123",
+      accountEmail: "ops@example.com",
+      scopes: ["channels:read"],
+    });
+    expect(oauth).toMatchObject({
+      providerKey: "slack",
+      authMode: "oauth",
+      status: "connected",
+      accountEmail: "ops@example.com",
+    });
+
+    await store.storeApiKeyConnection({ providerKey: "stripe", apiKey: "rk_live_test" });
+    expect(await store.readApiKey("stripe")).toBe("rk_live_test");
+    expect(await store.readApiKey("missing-provider")).toBeUndefined();
+  });
+
+  it("skips unreadable vault artifacts when listing connections", async () => {
+    const store = await importStore();
+    await store.storeApiKeyConnection({ providerKey: "good", apiKey: "key-1" });
+    db.prepare(
+      `INSERT INTO raw_artifacts
+         (id, tenant_id, source_type, source_id, artifact_uri, artifact_path, content_hash, created_at)
+       VALUES ('bad-artifact', 'default-tenant', 'tool_connection', 'broken', 'vault://broken', 'missing.bin', 'hash', datetime('now'))`,
+    ).run();
+    const listed = store.listVaultConnections();
+    expect(listed.some((item) => item.providerKey === "good")).toBe(true);
+    expect(listed.some((item) => item.providerKey === "broken")).toBe(false);
+  });
+
+  it("returns fallback activity rows when audit metadata is corrupt", async () => {
+    const store = await importStore();
+    db.prepare(
+      `INSERT INTO audit_entries
+         (id, tenant_id, actor_id, actor_role, event_type, entity_type, entity_id, reason, metadata_json, created_at)
+       VALUES ('bad-audit', 'default-tenant', 'operator', 'operator', 'tool_auth.connection_established', 'tool_connection', 'slack', NULL, '{bad-json', datetime('now'))`,
+    ).run();
+    const events = store.listActivityEvents(5);
+    expect(events[0]).toMatchObject({
+      providerKey: "unknown",
+      type: "connection_established",
+    });
+  });
+});
+
 describe("Phase 179 storeApiKeyConnection + listVaultConnections", () => {
   it("stores an API-key connection and lists it back", async () => {
     const store = await importStore();
