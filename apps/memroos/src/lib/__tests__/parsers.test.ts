@@ -413,6 +413,72 @@ describe("parsers", () => {
       }
     });
 
+    it("aggregates duplicate models across multiple assistant lines in one jsonl file", async () => {
+      const prev = process.env.HOME;
+      process.env.HOME = root;
+      const projectDir = path.join(root, ".claude", "projects", "aggregate");
+      await mkdir(projectDir, { recursive: true });
+      const jsonl = [
+        JSON.stringify({
+          type: "assistant",
+          requestId: "r-a",
+          timestamp: new Date().toISOString(),
+          message: {
+            model: "claude-sonnet-4-5",
+            usage: { input_tokens: 2, output_tokens: 1, cache_read_input_tokens: 1 },
+          },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          requestId: "r-b",
+          timestamp: new Date().toISOString(),
+          message: {
+            model: "claude-sonnet-4-5",
+            usage: { input_tokens: 3, output_tokens: 2, cache_creation_input_tokens: 4 },
+          },
+        }),
+      ].join("\n");
+      await writeFile(path.join(projectDir, "session.jsonl"), jsonl);
+      try {
+        const usage = await parseModelUsage();
+        const sonnet = usage.models.find((m) => m.name === "Sonnet 4.5");
+        expect(sonnet?.requests).toBe(2);
+        expect(sonnet?.inputTokens).toBe(9);
+        expect(sonnet?.cacheRead).toBe(1);
+        expect(sonnet?.cacheCreation).toBe(4);
+      } finally {
+        process.env.HOME = prev;
+      }
+    });
+
+    it("normalizes generic sonnet and haiku model ids", async () => {
+      const prev = process.env.HOME;
+      process.env.HOME = root;
+      const projectDir = path.join(root, ".claude", "projects", "names");
+      await mkdir(projectDir, { recursive: true });
+      const jsonl = [
+        JSON.stringify({
+          type: "assistant",
+          requestId: "sonnet-generic",
+          timestamp: new Date().toISOString(),
+          message: { model: "claude-3-sonnet-20240229", usage: { input_tokens: 1, output_tokens: 1 } },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          requestId: "haiku-generic",
+          timestamp: new Date().toISOString(),
+          message: { model: "claude-3-haiku-20240307", usage: { input_tokens: 1, output_tokens: 1 } },
+        }),
+      ].join("\n");
+      await writeFile(path.join(projectDir, "session.jsonl"), jsonl);
+      try {
+        const usage = await parseModelUsage();
+        expect(usage.models.map((m) => m.name).sort()).toEqual(["Haiku", "Sonnet"]);
+      } finally {
+        process.env.HOME = prev;
+      }
+    });
+
     it("skips jsonl files older than the since filter", async () => {
       const prev = process.env.HOME;
       process.env.HOME = root;

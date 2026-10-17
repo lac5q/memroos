@@ -64,6 +64,13 @@ describe("mcp-client JSON-RPC transport", () => {
     );
   });
 
+  it("throws when response body has no parseable JSON-RPC result", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response("not json at all", { status: 200 }));
+    await expect(initialize("https://mcp.example/rpc", "tok")).rejects.toSatisfy(
+      (err: unknown) => err instanceof Error && err.message.includes("no parseable result")
+    );
+  });
+
   it("callRest serializes object query params on GET", async () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 })

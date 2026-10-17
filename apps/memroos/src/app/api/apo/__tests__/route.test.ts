@@ -422,6 +422,18 @@ describe("POST /api/apo validation and errors", () => {
     expect(archived?.tracking?.label).toBe("Implemented");
   });
 
+  it("returns 404 when apply-approved cannot find a queued proposal", async () => {
+    const { POST } = await loadRoute();
+    const response = await POST(
+      makeApproveRequest({
+        action: "apply-approved",
+        proposalId: proposalFilename,
+      }),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe("Approved proposal not found");
+  });
+
   it("process-approved honors limit and archived tracking labels applied=false", async () => {
     const { GET, POST } = await loadRoute();
     await POST(makeApproveRequest({ action: "approve", proposalId: proposalFilename }));

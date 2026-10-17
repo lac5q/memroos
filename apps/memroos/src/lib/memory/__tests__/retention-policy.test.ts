@@ -7,8 +7,13 @@ import {
   createRetentionPolicy,
   evaluateRetentionDeadline,
   evaluateRetentionPolicy,
+  emitRetentionReceipt,
   listRetentionReceipts,
+  parseJsonObject,
   registerRetentionRecord,
+  scopeHash,
+  sha256Hex,
+  stableJson,
 } from "../retention-policy";
 
 let db: Database.Database | null = null;
@@ -190,6 +195,65 @@ describe("memory retention policy selection", () => {
     });
 
     expect(evaluation.decision).toBe("policy_unavailable");
+  });
+
+  it("parses invalid JSON objects as empty records", () => {
+    expect(parseJsonObject("{")).toEqual({});
+    expect(parseJsonObject(null)).toEqual({});
+    expect(stableJson([1, { b: 2, a: 1 }])).toContain("1");
+    expect(scopeHash({ tenantId: "default-tenant", project: "alpha" })).toHaveLength(64);
+    expect(sha256Hex("x")).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  it("rejects invalid policy inputs and sensitive receipt metadata", () => {
+    const database = freshDb();
+    expect(() =>
+      createRetentionPolicy(database, {
+        name: "bad",
+        ontologyType: "memory.note",
+        securityLabel: { sensitivity: "internal" },
+        purpose: "recall",
+        durationDays: -1,
+        actorId: "operator-1",
+      })
+    ).toThrow(/durationDays/);
+
+    expect(() =>
+      emitRetentionReceipt(database, {
+        recordType: "message",
+        recordId: "msg-sensitive",
+        decision: "active",
+        reason: "test",
+        actorId: "operator-1",
+        scope: { tenantId: "default-tenant" },
+        metadata: { password: "secret-value" },
+      })
+    ).toThrow(/cannot contain raw memory/i);
+  });
+
+  it("matches wildcard ontology and array scope selectors", () => {
+    const database = freshDb();
+    createRetentionPolicy(database, {
+      id: "policy-wild",
+      name: "wildcard",
+      ontologyType: "*",
+      securityLabel: { sensitivity: "internal" },
+      purpose: "*",
+      scope: { tenantId: "default-tenant", project: ["alpha", "beta"] },
+      priority: 1,
+      durationDays: 3,
+      actorId: "operator-1",
+    });
+    const evaluation = evaluateRetentionPolicy(database, {
+      tenantId: "default-tenant",
+      ontologyType: "memory.event",
+      securityLabel: { sensitivity: "internal" },
+      purpose: "dispatch",
+      scope: { tenantId: "default-tenant", project: "beta" },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    expect(evaluation.decision).toBe("selected");
+    expect(evaluation.selectedPolicy?.id).toBe("policy-wild");
   });
 
   it("lists retention receipts filtered by record id and run key", () => {

@@ -106,6 +106,49 @@ describe("L3 adapters — live fetch paths (mocked fetch)", () => {
     expect(events.some((e) => e.eventType === "csat_rating")).toBe(true);
   });
 
+  it("hubspot returns empty when token missing or API errors", async () => {
+    delete process.env.HUBSPOT_ACCESS_TOKEN;
+    const empty = await createHubSpotAdapter({ mock: false }).poll(since);
+    expect(empty).toEqual([]);
+
+    process.env.HUBSPOT_ACCESS_TOKEN = "tok";
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 503, text: async () => "down" });
+    expect(await createHubSpotAdapter({ mock: false }).poll(since)).toEqual([]);
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [
+          { id: "d-skip", properties: { dealstage: "closedwon" } },
+          {
+            id: "d-open",
+            properties: { memroos_correlation_id: "corr-open", dealstage: "qualified" },
+          },
+        ],
+      }),
+    });
+    const events = await createHubSpotAdapter({ mock: false }).poll(since);
+    expect(events.some((e) => e.correlationId === "corr-open" && e.kpiValue === 0.5)).toBe(true);
+    expect(events.some((e) => e.correlationId === "corr-open" && e.eventType === "lead_disposition")).toBe(
+      false
+    );
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [
+          {
+            id: "d-lost",
+            properties: { memroos_correlation_id: "corr-lost", dealstage: "closedlost" },
+          },
+        ],
+      }),
+    });
+    const closedLost = await createHubSpotAdapter({ mock: false }).poll(since);
+    expect(closedLost.some((e) => e.correlationId === "corr-lost" && e.kpiValue === 0)).toBe(true);
+    expect(closedLost.some((e) => e.eventType === "lead_disposition" && e.kpiValue === 0)).toBe(true);
+  });
+
   it("hubspot maps closed-won deals", async () => {
     process.env.HUBSPOT_ACCESS_TOKEN = "tok";
     fetchMock.mockResolvedValue({

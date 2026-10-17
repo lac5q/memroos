@@ -43,6 +43,16 @@ describe("tryAcquireSchedulerLock", () => {
     expect(tryAcquireSchedulerLock()).toBe(false);
   });
 
+  it("reclaims lock when stored pid is not a finite number", async () => {
+    lockPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sched-lock-")), "scheduler.lock");
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    fs.writeFileSync(lockPath, "not-a-pid");
+
+    const { tryAcquireSchedulerLock } = await loadLockModule();
+    expect(tryAcquireSchedulerLock()).toBe(true);
+    expect(fs.readFileSync(lockPath, "utf8").trim()).toBe(String(process.pid));
+  });
+
   it("reclaims stale lock when pid is dead", async () => {
     lockPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sched-lock-")), "scheduler.lock");
     fs.mkdirSync(path.dirname(lockPath), { recursive: true });

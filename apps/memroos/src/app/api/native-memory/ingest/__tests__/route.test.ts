@@ -76,6 +76,16 @@ describe("POST /api/native-memory/ingest", () => {
     expect(body.policy.neverDelete).toBe(true);
   });
 
+  it("400 when JSON body is invalid", async () => {
+    const req = new Request("http://localhost/api/native-memory/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{",
+    });
+    const res = await POST(req as never);
+    expect(res.status).toBe(400);
+  });
+
   it("accepts operator API key bearer", async () => {
     mockAuthenticateUser.mockResolvedValueOnce(null);
     process.env.MEMROOS_OPERATOR_API_KEY = "ingest-key";

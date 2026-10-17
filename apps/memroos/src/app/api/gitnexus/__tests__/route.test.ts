@@ -34,4 +34,14 @@ describe("GET /api/gitnexus", () => {
     expect(body.repos[0].files).toBe(9);
   });
 
+  it("returns empty repos when registry read fails", async () => {
+    readFile.mockRejectedValueOnce(new Error("ENOENT"));
+    process.env.GITNEXUS_REGISTRY = "/tmp/missing-registry.json";
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.repos).toEqual([]);
+    expect(typeof body.timestamp).toBe("string");
+  });
+
 });

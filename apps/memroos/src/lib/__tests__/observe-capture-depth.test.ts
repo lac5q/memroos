@@ -27,6 +27,7 @@ describe("observe capture depth policy", () => {
     expect(resolveCaptureDepth("summary")).toBe("summary");
     expect(resolveCaptureDepth(undefined, "full")).toBe("full");
     expect(resolveCaptureDepth("nope", "summary")).toBe("summary");
+    expect(resolveCaptureDepth("FULL")).toBe("full");
   });
 
   it("relevant projection never indexes transcript text", () => {

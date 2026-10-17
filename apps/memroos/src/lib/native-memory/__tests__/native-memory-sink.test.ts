@@ -59,6 +59,18 @@ describe("native-memory sink (ENTOPS-07 code slice)", () => {
     expect(result.alerts.some((a) => a.includes("directive_diff"))).toBe(true);
   });
 
+  it("omits directive diff when no canonical body is supplied", () => {
+    const result = processNativeMemoryIngest({
+      source: "codex",
+      agentId: "agent-no-canonical",
+      userId: "user-1",
+      content: "plain memory\n",
+      memoryPath: "MEMORY.md",
+    });
+    expect(result.diff).toBeNull();
+    expect(result.alerts.some((a) => a.includes("directive_diff"))).toBe(false);
+  });
+
   it("does not auto-trim over-budget content — only warns", () => {
     const lines = Array.from({ length: 250 }, (_, i) => `line-${i}`).join("\n");
     const result = processNativeMemoryIngest({

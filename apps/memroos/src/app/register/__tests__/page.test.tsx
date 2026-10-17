@@ -40,6 +40,12 @@ describe("RegisterPage", () => {
     });
   });
 
+  it("blocks submit when email or password is empty", async () => {
+    render(<RegisterPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("redirects to login after success", async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: true,

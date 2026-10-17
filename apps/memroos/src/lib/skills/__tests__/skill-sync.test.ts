@@ -1805,3 +1805,411 @@ describe("detectHarnessSkills filesystem failure paths", () => {
   });
 });
 
+describe("skill-sync additional error and edge coverage", () => {
+  it("validation helpers reject empty names, operators, and malformed hashes", async () => {
+    const {
+      diffSkills,
+      createImportProposal,
+      rejectImportProposal,
+      SkillSyncError,
+    } = await import("../skill-sync");
+    expect(() =>
+      diffSkills(null, {
+        skill_name: "  ",
+        source_harness: "claude",
+        raw_body: VALID_SKILL_MD("x", "1.0.0"),
+      })
+    ).toThrow(SkillSyncError);
+    expect(() =>
+      createImportProposal(db, {
+        source_harness: "claude",
+        detected: {
+          skill_name: "hash-shape",
+          source_harness: "claude",
+          content_hash: "not-64-chars",
+        },
+        proposed_by: "scanner",
+      })
+    ).toThrow(/64-char SHA-256/);
+    expect(() =>
+      createImportProposal(db, {
+        source_harness: "claude",
+        detected: {
+          skill_name: "no-proposer",
+          source_harness: "claude",
+          raw_body: VALID_SKILL_MD("no-proposer", "1.0.0"),
+        },
+        proposed_by: " ",
+      })
+    ).toThrow(SkillSyncError);
+    expect(() =>
+      rejectImportProposal(db, {
+        skill_name: "reason-required",
+        source_harness: "claude",
+        operator: "alice",
+        reason: " ",
+      })
+    ).toThrow(SkillSyncError);
+  });
+
+  it("detectHarnessSkills skips empty roots, dotfiles, directories, and unreadable files", async () => {
+    const { detectHarnessSkills } = await import("../skill-sync");
+    const harnessRoots = buildHarnessRoots(TMP_ROOT);
+    fs.mkdirSync(harnessRoots.claude, { recursive: true });
+    writeHarnessSkill(harnessRoots.claude, "visible", VALID_SKILL_MD("visible", "1.0.0"));
+    fs.writeFileSync(
+      path.join(harnessRoots.claude, ".hidden-skill.md"),
+      VALID_SKILL_MD("hidden-skill", "1.0.0"),
+      "utf8"
+    );
+    fs.mkdirSync(path.join(harnessRoots.claude, "subdir-skill.md"), { recursive: true });
+    const locked = path.join(harnessRoots.claude, "locked-skill.md");
+    fs.writeFileSync(locked, VALID_SKILL_MD("locked-skill", "1.0.0"), "utf8");
+    fs.chmodSync(locked, 0o000);
+    const roots = {
+      ...harnessRoots,
+      codex: "",
+    };
+    try {
+      const detected = detectHarnessSkills({ roots });
+      expect(detected.entries.map((e) => e.skill_name)).toContain("visible");
+      expect(detected.entries.some((e) => e.skill_name === "hidden-skill")).toBe(false);
+      expect(
+        detected.errors.some((e) => e.reason.includes("Cannot read file"))
+      ).toBe(true);
+    } finally {
+      fs.chmodSync(locked, 0o644);
+    }
+  });
+
+  it("detectHarnessSkills flags invalid UTF-8 and frontmatter edge cases", async () => {
+    const { detectHarnessSkills } = await import("../skill-sync");
+    const harnessRoots = buildHarnessRoots(TMP_ROOT);
+    fs.mkdirSync(harnessRoots.opencode, { recursive: true });
+    fs.writeFileSync(
+      path.join(harnessRoots.opencode, "plain-body.md"),
+      "# No frontmatter — filename fallback\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(harnessRoots.opencode, "empty-name.md"),
+      "---\nname:\nversion:\n---\n\nBody\n",
+      "utf8"
+    );
+    const garbage = Buffer.alloc(32, 0xff);
+    fs.writeFileSync(path.join(harnessRoots.opencode, "garbage.md"), garbage);
+    const detected = detectHarnessSkills({ roots: harnessRoots });
+    const plain = detected.entries.find((e) => e.skill_name === "plain-body");
+    expect(plain?.parse_error).toMatch(/No `name:` frontmatter/);
+    const emptyName = detected.entries.find((e) => e.skill_name === "empty-name");
+    expect(emptyName?.parse_error).toBeTruthy();
+    expect(
+      detected.errors.some((e) => e.reason.includes("not valid UTF-8"))
+    ).toBe(true);
+  });
+
+  it("listSyncObservability marks rejected when rejected_at is set without pending id", async () => {
+    const { listSyncObservability } = await import("../skill-sync");
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO skill_sync_state (
+        skill_name, source_harness, last_synced_hash, pending_proposal_id,
+        pending_detected_hash, pending_detected_version, pending_diff_summary,
+        pending_diff_payload, pending_proposed_by, pending_proposed_at,
+        version_pinned_to, last_check_at, prior_version, prior_content_hash,
+        prior_skill_id, approved_by, approved_at, rejected_by, rejected_at,
+        rejection_reason, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, NULL,
+        NULL, NULL, '',
+        '{}', NULL, NULL,
+        NULL, ?, NULL, NULL,
+        NULL, NULL, NULL, ?, ?,
+        ?, ?, ?
+      )`
+    ).run(
+      "rej-only",
+      "claude",
+      "0".repeat(64),
+      now,
+      "bob",
+      now,
+      "declined",
+      now,
+      now
+    );
+    const item = listSyncObservability(db).find((o) => o.skill_name === "rej-only");
+    expect(item?.status).toBe("rejected");
+  });
+
+  it("approveImportProposal uses version from diff payload and rejects missing detected hash", async () => {
+    const { createImportProposal, approveImportProposal, SkillSyncError } =
+      await import("../skill-sync");
+    insertSkillRow({ name: "payload-version", content_hash: "0".repeat(64), version: "1.0.0" });
+    createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "payload-version",
+        source_harness: "claude",
+        raw_body: VALID_SKILL_MD("payload-version", "3.0.0"),
+        content_hash: "1".repeat(64),
+      },
+      proposed_by: "scanner",
+      diff_payload: { version: "3.0.0", raw_body: VALID_SKILL_MD("payload-version", "3.0.0") },
+    });
+    approveImportProposal(db, {
+      skill_name: "payload-version",
+      source_harness: "claude",
+      operator: "alice",
+    });
+    const reg = db
+      .prepare(`SELECT version FROM skill_registry WHERE name = ?`)
+      .get("payload-version") as { version: string };
+    expect(reg.version).toBe("3.0.0");
+
+    insertSkillRow({ name: "no-detected-hash", content_hash: "2".repeat(64) });
+    const { proposal } = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "no-detected-hash",
+        source_harness: "claude",
+        raw_body: VALID_SKILL_MD("no-detected-hash", "2.0.0"),
+        content_hash: "3".repeat(64),
+      },
+      proposed_by: "scanner",
+    });
+    db.prepare(
+      `UPDATE skill_sync_state SET pending_detected_hash = NULL WHERE skill_name = ?`
+    ).run("no-detected-hash");
+    expect(() =>
+      approveImportProposal(db, {
+        skill_name: "no-detected-hash",
+        source_harness: "claude",
+        operator: "alice",
+      })
+    ).toThrow(/missing detected hash/);
+    expect(proposal.pending_proposal_id).toBeTruthy();
+  });
+
+  it("approveSyncProposalById inserts registry row and validates proposal hash shape", async () => {
+    const {
+      createImportProposal,
+      approveSyncProposalById,
+      rejectSyncProposalById,
+      SkillSyncError,
+    } = await import("../skill-sync");
+    const body = VALID_SKILL_MD("by-id-new", "1.0.0");
+    const hash = "a".repeat(64);
+    insertSkillRow({
+      name: "by-id-new",
+      source_harness: "hermes",
+      content_hash: "0".repeat(64),
+      version: "0.9.0",
+      raw_body: VALID_SKILL_MD("by-id-new", "0.9.0"),
+    });
+    const { proposal } = createImportProposal(db, {
+      source_harness: "hermes",
+      detected: {
+        skill_name: "by-id-new",
+        source_harness: "hermes",
+        raw_body: body,
+        content_hash: hash,
+      },
+      proposed_by: "scanner",
+    });
+    const approved = approveSyncProposalById(db, {
+      proposal_id: proposal.pending_proposal_id!,
+      operator: "alice",
+    });
+    expect(approved.registry_updated).toBe(true);
+    const reg = db
+      .prepare(
+        `SELECT dispatch_status, content_hash FROM skill_registry WHERE name = ? AND source_harness = ?`
+      )
+      .get("by-id-new", "hermes") as { dispatch_status: string; content_hash: string };
+    expect(reg.dispatch_status).toBe("quarantined");
+    expect(reg.content_hash).toBe(hash);
+
+    insertSkillRow({ name: "bad-hash-id", content_hash: "4".repeat(64) });
+    const badHash = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "bad-hash-id",
+        source_harness: "claude",
+        content_hash: "5".repeat(64),
+        raw_body: VALID_SKILL_MD("bad-hash-id", "2.0.0"),
+      },
+      proposed_by: "scanner",
+    });
+    db.prepare(
+      `UPDATE skill_sync_state SET pending_detected_hash = 'bad' WHERE pending_proposal_id = ?`
+    ).run(badHash.proposal.pending_proposal_id);
+    expect(() =>
+      approveSyncProposalById(db, {
+        proposal_id: badHash.proposal.pending_proposal_id!,
+        operator: "alice",
+      })
+    ).toThrow(/valid detected_content_hash/);
+
+    insertSkillRow({ name: "double-reject-id", content_hash: "6".repeat(64) });
+    const pending = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "double-reject-id",
+        source_harness: "claude",
+        content_hash: "7".repeat(64),
+        raw_body: VALID_SKILL_MD("double-reject-id", "2.0.0"),
+      },
+      proposed_by: "scanner",
+    });
+    const pid = pending.proposal.pending_proposal_id!;
+    db.prepare(
+      `UPDATE skill_sync_state SET rejected_at = ? WHERE pending_proposal_id = ?`
+    ).run(new Date().toISOString(), pid);
+    expect(() =>
+      rejectSyncProposalById(db, {
+        proposal_id: pid,
+        operator: "bob",
+        reason: "twice",
+      })
+    ).toThrow(/already rejected/);
+  });
+
+  it("pinVersion updates an existing sync_state row instead of inserting", async () => {
+    const { createImportProposal, pinVersion, getSyncStateRow } = await import("../skill-sync");
+    insertSkillRow({ name: "pin-update-row", content_hash: "0".repeat(64) });
+    createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "pin-update-row",
+        source_harness: "claude",
+        content_hash: "1".repeat(64),
+        raw_body: VALID_SKILL_MD("pin-update-row", "2.0.0"),
+      },
+      proposed_by: "scanner",
+    });
+    const before = getSyncStateRow(db, "pin-update-row", "claude");
+    expect(before?.pending_proposal_id).toBeTruthy();
+    const pinned = pinVersion(db, {
+      skill_name: "pin-update-row",
+      source_harness: "claude",
+      version: "1.0.0",
+      actor: "alice",
+    });
+    expect(pinned.version_pinned_to).toBe("1.0.0");
+    expect(pinned.pending_proposal_id).toBeTruthy();
+  });
+
+  it("createImportProposal derives hash from raw_body when content_hash is omitted", async () => {
+    const { createImportProposal, computeContentHash } = await import("../skill-sync");
+    insertSkillRow({ name: "raw-only-hash", content_hash: "0".repeat(64) });
+    const body = VALID_SKILL_MD("raw-only-hash", "2.0.0");
+    const result = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "raw-only-hash",
+        source_harness: "claude",
+        raw_body: body,
+      },
+      proposed_by: "scanner",
+    });
+    expect(result.created).toBe(true);
+    expect(result.proposal.pending_detected_hash).toBe(computeContentHash(body));
+  });
+
+  it("clearVersionPin throws when sync row exists but no pin is set", async () => {
+    const { clearVersionPin, SkillSyncError } = await import("../skill-sync");
+    insertSkillRow({ name: "unpinned-row", content_hash: "0".repeat(64) });
+    const now = new Date().toISOString();
+    db.prepare(
+      `INSERT INTO skill_sync_state (
+        skill_name, source_harness, last_synced_hash, pending_proposal_id,
+        pending_detected_hash, pending_detected_version, pending_diff_summary,
+        pending_diff_payload, pending_proposed_by, pending_proposed_at,
+        version_pinned_to, last_check_at, prior_version, prior_content_hash,
+        prior_skill_id, approved_by, approved_at, rejected_by, rejected_at,
+        rejection_reason, created_at, updated_at
+      ) VALUES (
+        ?, ?, NULL, NULL,
+        NULL, NULL, '',
+        '{}', NULL, NULL,
+        NULL, ?, NULL, NULL,
+        NULL, NULL, NULL, NULL, NULL,
+        NULL, ?, ?
+      )`
+    ).run("unpinned-row", "claude", now, now, now);
+    expect(() =>
+      clearVersionPin(db, {
+        skill_name: "unpinned-row",
+        source_harness: "claude",
+        actor: "alice",
+      })
+    ).toThrow(/No version pin set/);
+  });
+
+  it("approveSyncProposalById refuses proposals marked rejected while still addressable by id", async () => {
+    const { createImportProposal, approveSyncProposalById, SkillSyncError } =
+      await import("../skill-sync");
+    insertSkillRow({ name: "rej-by-id", content_hash: "0".repeat(64) });
+    const { proposal } = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "rej-by-id",
+        source_harness: "claude",
+        content_hash: "1".repeat(64),
+        raw_body: VALID_SKILL_MD("rej-by-id", "2.0.0"),
+      },
+      proposed_by: "scanner",
+    });
+    db.prepare(
+      `UPDATE skill_sync_state SET rejected_at = ? WHERE pending_proposal_id = ?`
+    ).run(new Date().toISOString(), proposal.pending_proposal_id);
+    expect(() =>
+      approveSyncProposalById(db, {
+        proposal_id: proposal.pending_proposal_id!,
+        operator: "alice",
+      })
+    ).toThrow(/was rejected/);
+  });
+
+  it("detectHarnessSkills records errors when the harness root cannot be opened", async () => {
+    const { detectHarnessSkills } = await import("../skill-sync");
+    const harnessRoots = buildHarnessRoots(TMP_ROOT);
+    fs.mkdirSync(harnessRoots.claude, { recursive: true });
+    fs.chmodSync(harnessRoots.claude, 0o000);
+    try {
+      const detected = detectHarnessSkills({ roots: harnessRoots });
+      expect(
+        detected.errors.some(
+          (e) =>
+            e.source_harness === "claude" &&
+            (e.reason.includes("Cannot canonicalize") ||
+              e.reason.includes("Cannot read directory"))
+        )
+      ).toBe(true);
+    } finally {
+      fs.chmodSync(harnessRoots.claude, 0o755);
+    }
+  });
+
+  it("createImportProposal survives circular diff_payload via sanitizeJsonPayload", async () => {
+    const { createImportProposal } = await import("../skill-sync");
+    insertSkillRow({ name: "circular-payload", content_hash: "0".repeat(64) });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const result = createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "circular-payload",
+        source_harness: "claude",
+        content_hash: "9".repeat(64),
+        raw_body: VALID_SKILL_MD("circular-payload", "2.0.0"),
+      },
+      proposed_by: "scanner",
+      diff_payload: circular,
+    });
+    expect(result.created).toBe(true);
+    expect(result.proposal.pending_diff_payload).toBe("{}");
+  });
+});
+

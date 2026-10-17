@@ -49,6 +49,28 @@ describe("pollAllAdapters", () => {
 
     const writeSummary = await pollAllAdapters([writing], brokenDb);
     expect(writeSummary.errors.some((entry) => entry.includes("write exploded"))).toBe(true);
+
+    const okAdapter: BusinessSystemAdapter = {
+      name: "ok-adapter",
+      category: "crm",
+      poll: vi.fn(async () => [
+        {
+          tenantId: "default-tenant",
+          correlationId: "corr-2",
+          sourceSystem: "test",
+          adapter: "ok-adapter",
+          eventType: "deal.updated",
+          kpiValue: 2,
+          kpiKey: "amount",
+          rawJson: "{}",
+          polledAt: new Date().toISOString(),
+        },
+      ]),
+    };
+    const okSummary = await pollAllAdapters([okAdapter], db);
+    expect(okSummary.adapterResults[0]?.eventsPolled).toBe(1);
+    expect(okSummary.adapterResults[0]?.error).toBeNull();
+    expect(okSummary.errors).toHaveLength(0);
     db.close();
   });
 });

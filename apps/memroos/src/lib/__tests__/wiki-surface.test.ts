@@ -406,6 +406,33 @@ describe("wiki-digest", () => {
     expect(bad.reason).toBeTruthy();
   });
 
+  it("appends to existing wiki index and log files on subsequent digests", async () => {
+    const kb = makeVault();
+    const wikiRoot = path.join(kb, "llm-wiki", "wiki");
+    fs.mkdirSync(wikiRoot, { recursive: true });
+    fs.writeFileSync(path.join(wikiRoot, "index.md"), "# Wiki Index\n");
+    fs.writeFileSync(path.join(wikiRoot, "log.md"), "# Wiki Log\n");
+
+    await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: false,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      fetchMemories: async () => [
+        {
+          id: "m-append",
+          content: "Second digest should append to existing index and log files.",
+          createdAt: "2026-07-18T11:55:00.000Z",
+        },
+      ],
+      log: () => undefined,
+    });
+
+    const index = fs.readFileSync(path.join(wikiRoot, "index.md"), "utf8");
+    const log = fs.readFileSync(path.join(wikiRoot, "log.md"), "utf8");
+    expect(index).toContain("MemRoOS digest");
+    expect(log).toContain("wiki-digest");
+  });
+
   it("filters path-traversal graph nodes and accepts from/to edges", () => {
     const kb = makeVault();
     const graphFile = path.join(kb, "llm-wiki", "wiki", "graph", "knowledge-graph.json");

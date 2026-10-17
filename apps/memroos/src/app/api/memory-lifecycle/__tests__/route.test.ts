@@ -10,6 +10,7 @@ import { POST as expiryPost } from "../expiry/route";
 import { POST as decayPost } from "../decay/route";
 import { GET as holdsGet, POST as holdsPost } from "../legal-holds/route";
 import { GET as retentionGet, POST as retentionPost } from "../retention/route";
+import { POST as consolidationPost } from "../consolidation/route";
 import { POST as subjectErasurePost } from "../subject-erasure/route";
 
 const TMP_ROOT = path.join(os.tmpdir(), `memory-lifecycle-route-${crypto.randomUUID()}`);
@@ -36,6 +37,40 @@ afterEach(() => {
 });
 
 describe("memory lifecycle API routes", () => {
+  it("POST /consolidation accepts providerOverride summary on loopback", async () => {
+    process.env["MEMROOS_VAULT_ROOT"] = path.join(TMP_ROOT, "vault");
+    fs.mkdirSync(process.env["MEMROOS_VAULT_ROOT"], { recursive: true });
+    const res = await consolidationPost(
+      new Request("http://localhost/api/memory-lifecycle/consolidation", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          runKey: "route-consolidation-provider",
+          scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+          actorId: "operator",
+          providerOverride: { summary: "forced episodic summary" },
+          sources: [
+            {
+              canonicalId: "canon-route-1",
+              recordType: "message",
+              recordId: "9001",
+              content: "raw episodic",
+              contentHash: "abc123",
+              ontologyType: "memory.note",
+              tier: "mid",
+              classification: { visibility: "internal" },
+            },
+          ],
+        }),
+      })
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { ok: boolean; result: { status: string } };
+    expect(json.ok).toBe(true);
+    expect(json.result.status).toMatch(/completed/);
+    delete process.env["MEMROOS_VAULT_ROOT"];
+  });
+
   it("returns 400 when decay receives an invalid now timestamp", async () => {
     const res = await decayPost(
       jsonRequest({

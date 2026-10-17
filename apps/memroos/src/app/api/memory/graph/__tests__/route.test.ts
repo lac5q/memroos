@@ -49,6 +49,13 @@ describe("GET /api/memory/graph", () => {
     expect(await res.json()).toMatchObject({ ok: true, tier: "graph" });
   });
 
+  it("clamps invalid limit query params to defaults", async () => {
+    queryGraphMemory.mockResolvedValueOnce({ results: [] });
+    const res = await GET(new Request("http://localhost/api/memory/graph?q=edge&limit=not-a-number"));
+    expect(res.status).toBe(200);
+    expect(queryGraphMemory).toHaveBeenCalledWith("edge", 25);
+  });
+
   it("returns 502 when graph backend is unavailable", async () => {
     queryGraphMemory.mockRejectedValueOnce(new Error("neo4j offline"));
     const res = await GET(new Request("http://localhost/api/memory/graph"));

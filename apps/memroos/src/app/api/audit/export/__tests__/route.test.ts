@@ -24,6 +24,11 @@ describe("GET /api/audit/export", () => {
     authenticateUser.mockReset();
   });
 
+  it("returns 403 when unauthenticated", async () => {
+    authenticateUser.mockResolvedValueOnce(null);
+    expect((await GET(new Request("http://localhost/api/audit/export") as never)).status).toBe(403);
+  });
+
   it("returns 403 for reviewer role", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "r1",

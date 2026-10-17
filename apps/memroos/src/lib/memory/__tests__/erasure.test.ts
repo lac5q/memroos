@@ -558,6 +558,21 @@ describe("coordinateErasure idempotency and scope", () => {
     expect(vector?.status).toBe("failed");
   });
 
+  it("traverseIndirectDerivatives ignores prior report outcomes without string storeId", () => {
+    const identity = buildCanonicalIdentity("skip bad storeId", "vault", "ingress", "vault");
+    db.prepare(
+      `INSERT INTO memory_erasure_reports (id, canonical_id, store_outcomes_json)
+       VALUES (?, ?, ?)`
+    ).run(
+      "er-skip-store",
+      identity.id,
+      JSON.stringify([{ storeId: 123, status: "tombstoned" }, { storeId: "fts", status: "purged" }])
+    );
+    const indirect = traverseIndirectDerivatives(db, identity);
+    expect(indirect.some((d) => d.storeId === "fts")).toBe(true);
+    expect(indirect.some((d) => d.storeId === "123")).toBe(false);
+  });
+
   it("traverseIndirectDerivatives includes snapshot rows from embedding provenance", () => {
     db.exec(`
       CREATE TABLE memory_embedding_provenance (

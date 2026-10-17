@@ -343,6 +343,128 @@ describe("runtime health route", () => {
     expect(knowledge.detail).toContain("stale embedding batch");
   });
 
+  it("marks RTK and QMD optional when their binaries are missing", async () => {
+    vi.mocked(execFile).mockImplementation((command, args, options, callback) => {
+      const done = typeof options === "function" ? options : callback;
+      if (!done) throw new Error("missing callback");
+      if (command === "rtk") {
+        done(new Error("rtk not found"), "", "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      if (command === "which" && Array.isArray(args) && args[0] === "qmd") {
+        done(new Error("qmd not found"), "", "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      if (Array.isArray(args) && args.includes("--json")) {
+        done(null, JSON.stringify({ ok: true, pendingEmbeddings: 0, failures: [], warnings: [] }), "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      done(null, "", "");
+      return {} as ReturnType<typeof execFile>;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          memory_runtime: { status: "available" },
+          queue: { queued: 0 },
+        })
+      )
+    );
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const rtk = body.services.find((service: { service: string }) => service.service === "RTK");
+    const qmd = body.services.find((service: { service: string }) => service.service === "QMD");
+    expect(rtk.status).toBe("degraded");
+    expect(rtk.detail).toMatch(/optional/i);
+    expect(qmd.status).toBe("degraded");
+    expect(qmd.detail).toMatch(/optional/i);
+  });
+
+  it("skips knowledge indexing when qmd is not installed", async () => {
+    vi.mocked(execFile).mockImplementation((command, args, options, callback) => {
+      const done = typeof options === "function" ? options : callback;
+      if (!done) throw new Error("missing callback");
+      if (command === "which" && Array.isArray(args) && args[0] === "qmd") {
+        done(new Error("ENOENT"), "", "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      done(null, "", "");
+      return {} as ReturnType<typeof execFile>;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          memory_runtime: { status: "available" },
+          queue: { queued: 0 },
+        })
+      )
+    );
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const knowledge = body.services.find((service: { service: string }) => service.service === "Knowledge Index");
+    expect(knowledge.status).toBe("up");
+    expect(knowledge.detail).toMatch(/skipped/i);
+  });
+
+  it("reports graph memory as up when Neo4j is healthy", async () => {
+    vi.doMock("@/lib/memory/backends", () => ({
+      checkGraphHealth: vi.fn(async () => ({ status: "up", backend: "neo4j" })),
+      mem0HealthTimeoutMs: () => 15_000,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          memory_runtime: { status: "available" },
+          queue: { queued: 0 },
+        })
+      )
+    );
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const graph = body.services.find((service: { service: string }) => service.service === "Graph Memory");
+    expect(graph.status).toBe("up");
+    expect(graph.detail).toBe("neo4j");
+    vi.doUnmock("@/lib/memory/backends");
+  });
+
+  it("marks knowledge indexing down when the contract script fails without stdout", async () => {
+    vi.mocked(execFile).mockImplementation((command, args, options, callback) => {
+      const done = typeof options === "function" ? options : callback;
+      if (!done) throw new Error("missing callback");
+      if (Array.isArray(args) && args.includes("--json")) {
+        done(new Error("script crashed"), "", "");
+        return {} as ReturnType<typeof execFile>;
+      }
+      done(null, "", "");
+      return {} as ReturnType<typeof execFile>;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          memory_runtime: { status: "available" },
+          queue: { queued: 0 },
+        })
+      )
+    );
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const knowledge = body.services.find((service: { service: string }) => service.service === "Knowledge Index");
+    expect(knowledge.status).toBe("down");
+    expect(knowledge.detail).toMatch(/script crashed|knowledge indexing check failed/i);
+  });
+
   it("includes graph memory status in app health", async () => {
     vi.stubGlobal(
       "fetch",

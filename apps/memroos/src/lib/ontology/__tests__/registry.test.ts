@@ -78,6 +78,26 @@ function packType(
 }
 
 describe("ontology registry validation", () => {
+  it("getOntologyProvenanceBinding returns null for unknown records", async () => {
+    const { mod } = await canonical();
+    expect(mod.getOntologyProvenanceBinding(db, "belief_candidate", "missing-record")).toBeNull();
+  });
+
+  it("discoverOntology throws when no active version exists for the ontology id", async () => {
+    const { mod } = await canonical();
+    expect(() => mod.discoverOntology(db, { ontologyId: "does-not-exist" })).toThrow(
+      /No active ontology version/
+    );
+  });
+
+  it("OntologyRegistryError exposes typed error codes", async () => {
+    const mod = await registry();
+    const err = new mod.OntologyRegistryError("pack not found", "not_found");
+    expect(err.name).toBe("OntologyRegistryError");
+    expect(err.code).toBe("not_found");
+    expect(err.message).toContain("pack not found");
+  });
+
   it("VAL-ONTO-001 creates one canonical active upper ontology with stable hashes and strict version lookup", async () => {
     const { mod, ontology } = await canonical();
     expect(ontology.contentHash).toBe(mod.canonicalContentHash({

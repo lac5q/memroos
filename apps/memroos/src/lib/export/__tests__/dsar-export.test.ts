@@ -61,6 +61,25 @@ function seedKnowledgeWrite(
 }
 
 describe("dsar-export (ENTOPS-08)", () => {
+  it("ignores malformed audit metadata when listing vault paths", () => {
+    db.prepare(
+      `INSERT INTO audit_entries (id, tenant_id, actor_id, actor_role, event_type, entity_type, entity_id, reason, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "bad-meta",
+      "default-tenant",
+      "operator",
+      "operator",
+      "knowledge_access",
+      "knowledge",
+      "k1",
+      null,
+      "{not-json",
+      new Date().toISOString()
+    );
+    expect(listVaultPathsForUser(db, "default-tenant", "operator")).toEqual([]);
+  });
+
   it("lists vault paths authored by the user from knowledge audit", () => {
     seedKnowledgeWrite(db, {
       tenantId: "default-tenant",

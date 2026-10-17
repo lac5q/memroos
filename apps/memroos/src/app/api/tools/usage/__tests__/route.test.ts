@@ -48,6 +48,20 @@ describe("GET /api/tools/usage", () => {
     expect(body.approachingLimit).toBe(false);
   });
 
+  it("flags approachingLimit when usage nears quota", async () => {
+    authenticateUser.mockResolvedValueOnce({
+      userId: "u1",
+      role: "operator",
+      email: "op@example.com",
+      displayName: "Op",
+      tenantId: "default-tenant",
+    });
+    getNangoUsage.mockResolvedValueOnce({ used: 9, limit: 10 });
+    const res = await GET(new Request("http://localhost/api/tools/usage") as never);
+    const body = await res.json();
+    expect(body.approachingLimit).toBe(true);
+  });
+
   it("returns 502 for upstream nango errors", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "u1",

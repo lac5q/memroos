@@ -64,6 +64,16 @@ describe("MeetingsPage", () => {
     });
   });
 
+  it("allows dismissing the consent dialog without joining", async () => {
+    render(<MeetingsPage />);
+    fireEvent.change(screen.getByPlaceholderText("https://..."), {
+      target: { value: "https://daily.test.local/room" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm Consent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss consent" }));
+    expect(screen.queryByText("Recording consent confirmed")).not.toBeInTheDocument();
+  });
+
   it("clears consent when room changes and surfaces join errors", async () => {
     render(<MeetingsPage />);
     fireEvent.change(screen.getByPlaceholderText("https://..."), {

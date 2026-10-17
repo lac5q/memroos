@@ -342,6 +342,13 @@ describe("VAL-ORCH-006 -- readViaMsiqAdapter and closeMsiqSession", () => {
     if (result.kind === "denied") expect(result.reason).toBe("session_not_found");
   });
 
+  it("closeMsiqSession returns unknown session id when token is missing", async () => {
+    const { closeMsiqSession } = await loadAdapter();
+    const closed = closeMsiqSession(db, "msst-not-found");
+    expect(closed.sessionId).toBe("msiq-unknown");
+    expect(closed.closedAt).toMatch(/^\d{4}-/);
+  });
+
   it("closeMsiqSession marks active sessions closed", async () => {
     const { openMsiqSession, closeMsiqSession } = await loadAdapter();
     const session = openMsiqSession(db, {
@@ -468,6 +475,34 @@ describe("VAL-ORCH-006 -- readViaMsiqAdapter and closeMsiqSession", () => {
       payload: { content: "late write" },
     });
     expect(write.kind).toBe("denied");
+  });
+
+  it("denies writes when the session label fails memory policy at write time", async () => {
+    const { openMsiqSession, writeViaMsiqAdapter } = await loadAdapter();
+    const sealedLabel = {
+      visibility: "internal" as const,
+      policy: "sealed" as const,
+      domain: null,
+      sensitivity: null,
+    };
+    const session = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: makeActor(),
+      spaceId: "space-1",
+      label: sealedLabel,
+      purpose: "memory-promotion",
+      beliefStage: "silver_candidate_claim",
+    });
+    if (session.kind !== "opened") throw new Error("session failed");
+    const write = writeViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      idempotencyKey: "policy-deny",
+      payload: { content: "blocked write" },
+    });
+    expect(write.kind).toBe("denied");
+    if (write.kind === "denied") {
+      expect(write.reason).toBe("policy_denied");
+    }
   });
 
   it("foundry-only mode refuses hosted fallback without provider override", async () => {

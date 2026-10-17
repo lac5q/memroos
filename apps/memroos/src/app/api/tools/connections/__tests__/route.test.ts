@@ -62,6 +62,12 @@ describe("GET /api/tools/connections", () => {
     expect(body.connections).toHaveLength(1);
   });
 
+  it("returns 401 when session is missing", async () => {
+    authenticateUser.mockResolvedValueOnce(null);
+    const res = await GET(new Request("http://localhost/api/tools/connections") as never);
+    expect(res.status).toBe(401);
+  });
+
   it("merges nango connections when available", async () => {
     authenticateUser.mockResolvedValueOnce({
       userId: "u1",

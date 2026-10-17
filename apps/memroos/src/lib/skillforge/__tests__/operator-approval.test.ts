@@ -188,6 +188,49 @@ describe("SkillForge Operator Approval", () => {
     expect(queue.rejected.map((proposal) => proposal.id)).toContain("rejected-1");
   });
 
+  it("returns errors for missing proposals and unknown actions", () => {
+    const missing = applyApprovalAction(db, { proposalId: "missing", action: "approve", operator: "test" });
+    expect(missing.success).toBe(false);
+    expect(missing.error).toMatch(/not found/i);
+
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("p-unknown", "skill-1", "1.0.0", "diff", "pending", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    const unknown = applyApprovalAction(db, {
+      proposalId: "p-unknown",
+      action: "launch" as "approve",
+      operator: "test",
+    });
+    expect(unknown.success).toBe(false);
+    expect(unknown.error).toMatch(/Unknown action/i);
+  });
+
+  it("approves gated proposals and rejects rollback on pending rows", () => {
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("gated-1", "skill-1", "1.0.0", "diff", "gated", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    const approved = applyApprovalAction(db, { proposalId: "gated-1", action: "approve", operator: "test" });
+    expect(approved.success).toBe(true);
+    expect(getProposal(db, "gated-1")?.status).toBe("approved");
+
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("pending-rollback", "skill-1", "1.0.0", "diff", "pending", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    const rollbackPending = applyApprovalAction(db, {
+      proposalId: "pending-rollback",
+      action: "rollback",
+      operator: "test",
+    });
+    expect(rollbackPending.success).toBe(false);
+    expect(rollbackPending.error).toMatch(/Cannot rollback/i);
+  });
+
   it("rolls back an applied proposal without export history as status-only honesty", () => {
     db.prepare(
       `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)

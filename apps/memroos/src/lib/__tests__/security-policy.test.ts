@@ -104,6 +104,13 @@ describe("security policy guards", () => {
     });
   });
 
+  it("allows legacy undeclared capabilities when explicit override env is set", () => {
+    process.env.MEMROOS_A2A_PROFILE = "cloud-https";
+    process.env.MEMROOS_ALLOW_LEGACY_UNDECLARED_CAPABILITIES = "1";
+    expect(checkDispatchPolicy("memroos", remoteAgent())).toEqual({ allowed: true });
+    expect(checkA2aSendPolicy(registeredAgent())).toEqual({ allowed: true });
+  });
+
   it("allows tier-specific memory writes only for matching tiers", () => {
     const agent = registeredAgent([
       { id: "memory:write:episodic", name: "Episodic", description: "", tags: [] },

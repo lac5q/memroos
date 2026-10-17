@@ -1,4 +1,5 @@
 // @vitest-environment node
+import { randomUUID } from "crypto";
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { initSchema } from "@/lib/db-schema";
@@ -22,7 +23,10 @@ describe("POST /api/artifact-gate/prompt", () => {
   let spaceId = "";
 
   beforeEach(() => {
-    spaceId = createSpace(testDb, { tenantId: "default-tenant", name: `prompt-${Date.now()}` }).id;
+    spaceId = createSpace(testDb, {
+      tenantId: "default-tenant",
+      name: `prompt-${randomUUID()}`,
+    }).id;
   });
 
   it("returns 401 without auth", async () => {
