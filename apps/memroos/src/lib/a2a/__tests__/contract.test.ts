@@ -10,6 +10,9 @@ import {
   a2aTaskEventSchema,
   a2aTaskSchema,
   buildA2aOpenApiDocument,
+  parseA2aAgentCard,
+  parseA2aTask,
+  parseA2aTaskEvent,
 } from "../contract";
 import {
   A2A_CANONICAL_AGENT_CARD_PATH,
@@ -22,6 +25,7 @@ describe("A2A contract", () => {
     const card = buildMemroosAgentCard();
 
     expect(a2aAgentCardSchema.parse(card)).toEqual(card);
+    expect(parseA2aAgentCard(card)).toEqual(card);
   });
 
   it("rejects invalid task state values", () => {
@@ -53,6 +57,8 @@ describe("A2A contract", () => {
     };
 
     expect(a2aTaskEventSchema.parse(event)).toEqual(event);
+    expect(parseA2aTaskEvent(event)).toEqual(event);
+    expect(parseA2aTask(event.task)).toEqual(event.task);
   });
 
   it("builds an OpenAPI contract from the shared route constants", () => {

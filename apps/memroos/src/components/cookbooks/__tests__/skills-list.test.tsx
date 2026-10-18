@@ -65,6 +65,29 @@ beforeEach(() => {
 });
 
 describe("SkillsList", () => {
+  it("renders empty state when no skills are indexed", () => {
+    render(
+      <SkillsList totalSkills={0} allSkills={[]} skillDetails={[]} coverageGaps={[]} />,
+    );
+    expect(screen.getByText("No skills found.")).toBeTruthy();
+  });
+
+  it("builds fallback workflow cards and filters by search query", () => {
+    render(
+      <SkillsList
+        totalSkills={2}
+        allSkills={["alpha-skill", "beta-skill"]}
+        coverageGaps={["beta-skill"]}
+        coverageTelemetryStatus="untracked"
+      />,
+    );
+    expect(screen.getAllByText(/Skill metadata is still being indexed/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/coverage untracked/i)).toBeTruthy();
+    fireEvent.change(screen.getByPlaceholderText(/Search skill, owner, stage/i), { target: { value: "beta" } });
+    expect(screen.getAllByText("beta-skill").length).toBeGreaterThan(0);
+    expect(screen.getByText(/In review/i)).toBeTruthy();
+  });
+
   it("renders the review workflow and persists approval actions", async () => {
     render(
       <SkillsList

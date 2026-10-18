@@ -983,6 +983,51 @@ describe("belief promotion pipeline", () => {
     })).toThrow("caller-supplied ontology context is not accepted");
   });
 
+  it("demoteCandidate records superseding candidate id when reason is superseded_by_conflict", () => {
+    const memoryType = "decision_intent";
+    const content = "Shared supersession claim body";
+    const gold = insertFixture(db, { memoryType, content, category: "operational" });
+    expect(
+      promoteCandidate(db, {
+        candidateId: gold.candidateId,
+        tenantId: TENANT,
+        actor: { id: "test-operator", role: "operator" },
+        category: "operational",
+      }).kind
+    ).toBe("admitted");
+
+    const challenger = insertFixture(db, {
+      memoryType,
+      content,
+      category: "operational",
+      captureHash: sha256(`cap-challenger-${crypto.randomUUID()}`),
+    });
+    const now = new Date().toISOString();
+    db.prepare(
+      `UPDATE agent_memory_candidates
+       SET belief_stage = 'gold_operational_truth', promoted_at = ?, promoted_by = ?
+       WHERE id = ?`
+    ).run(now, "test-operator", challenger.candidateId);
+
+    demoteCandidate(db, {
+      candidateId: gold.candidateId,
+      tenantId: TENANT,
+      reason: "superseded_by_conflict",
+      actor: { id: "test-operator", role: "operator" },
+      category: "operational",
+    });
+
+    const demotionRow = db
+      .prepare(
+        `SELECT metadata_json FROM belief_promotion_decisions
+         WHERE candidate_id = ? AND decision_type = 'demoted'
+         ORDER BY created_at DESC LIMIT 1`
+      )
+      .get(gold.candidateId) as { metadata_json: string };
+    const metadata = JSON.parse(demotionRow.metadata_json) as { supersedesCandidateId?: string | null };
+    expect(metadata.supersedesCandidateId).toBe(challenger.candidateId);
+  });
+
   it("normalizeCategory maps unknown labels to unclassified and trims valid categories", () => {
     expect(normalizeCategory("  OPERATIONAL  ")).toBe("operational");
     expect(normalizeCategory("not-a-real-category")).toBe("unclassified");
@@ -1146,6 +1191,48 @@ describe("belief promotion pipeline", () => {
     expect(provenance?.evidence).toMatchObject({ reason: "capture_not_found" });
   });
 
+  it("provenance_check_denies_capture_without_raw_artifact", () => {
+    const f = insertFixture(db, { category: "operational" });
+    db.prepare(`UPDATE agent_session_captures SET raw_artifact_id = NULL WHERE id = ?`).run(
+      f.captureId
+    );
+    const provenance = evaluatePromotionChecks(db, TENANT, f.candidateId).find(
+      (c) => c.name === "provenance"
+    );
+    expect(provenance?.pass).toBe(false);
+    expect(provenance?.evidence).toMatchObject({ reason: "no_raw_artifact" });
+  });
+
+  it("provenance_check_denies_missing_capture_hash", () => {
+    const f = insertFixture(db, { category: "operational" });
+    db.prepare(`UPDATE agent_session_captures SET capture_hash = '' WHERE id = ?`).run(f.captureId);
+    const provenance = evaluatePromotionChecks(db, TENANT, f.candidateId).find(
+      (c) => c.name === "provenance"
+    );
+    expect(provenance?.pass).toBe(false);
+    expect(provenance?.evidence).toMatchObject({ reason: "capture_hash_missing" });
+  });
+
+  it("resolveReview rejects invalid resolution values", () => {
+    const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
+    const queued = promoteCandidate(db, {
+      candidateId: f.candidateId,
+      tenantId: TENANT,
+      actor: { id: "operator-1", role: "operator" },
+      category: "pricing",
+    });
+    expect(queued.kind).toBe("queued_for_review");
+    if (queued.kind !== "queued_for_review") throw new Error("expected queue");
+    expect(() =>
+      resolveReview(db, {
+        queueId: queued.queueId,
+        tenantId: TENANT,
+        resolution: "maybe" as "approved",
+        operatorId: "operator-2",
+      })
+    ).toThrow(/invalid resolution/);
+  });
+
   it("resolveReview rejects unknown queue ids and already-resolved items", () => {
     const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
     const queued = promoteCandidate(db, {
@@ -1279,6 +1366,84 @@ describe("belief promotion pipeline", () => {
     expect(decision.kind).toBe("denied");
     if (decision.kind !== "denied") throw new Error("expected denied");
     expect(decision.failedCheck).toBe("policy");
+  });
+
+  it("canAdmitToGold throws when candidate is gold without a promoted decision row", () => {
+    const f = insertFixture(db, { category: "operational" });
+    db.prepare(
+      `UPDATE agent_memory_candidates SET belief_stage = 'gold_operational_truth' WHERE id = ?`
+    ).run(f.candidateId);
+    expect(() =>
+      canAdmitToGold(db, TENANT, f.candidateId, {
+        actor: { id: "test-operator", role: "operator" },
+        category: "operational",
+      })
+    ).toThrow(/no promotion decision row/);
+  });
+
+  it("canAdmitToGold rejects reviewedQueueId when the queue item is not approved", () => {
+    const f = insertFixture(db, { category: "pricing", memoryType: "runbook" });
+    const queued = promoteCandidate(db, {
+      candidateId: f.candidateId,
+      tenantId: TENANT,
+      actor: { id: "operator-1", role: "operator" },
+      category: "pricing",
+    });
+    expect(queued.kind).toBe("queued_for_review");
+    if (queued.kind !== "queued_for_review") throw new Error("expected queue");
+    expect(() =>
+      canAdmitToGold(db, TENANT, f.candidateId, {
+        actor: { id: "operator-2", role: "operator" },
+        category: "pricing",
+        reviewedQueueId: queued.queueId,
+      })
+    ).toThrow(/not approved/);
+  });
+
+  it("resolveReview rejects malformed queue rows missing required fields", () => {
+    const f = insertFixture(db, { category: "operational" });
+    const queueId = crypto.randomUUID();
+    db.prepare(
+      `INSERT INTO belief_review_queue
+         (id, tenant_id, candidate_id, category, status, opened_by, opened_at,
+          ontology_record_type, ontology_record_id, ontology_space_id, ontology_id, ontology_version,
+          ontology_content_hash, ontology_canonical_id, ontology_source_id,
+          ontology_source_hash, ontology_derivative_id)
+       VALUES (?, ?, ?, '', 'open', 'operator', ?, 'belief_candidate', ?, 'belief-review-space',
+               'ont', '1.0.0', 'sha256:abc', 'canon', 'src', 'sha256:def', 'deriv')`
+    ).run(queueId, TENANT, f.candidateId, new Date().toISOString(), f.candidateId);
+    expect(() =>
+      resolveReview(db, {
+        queueId,
+        tenantId: TENANT,
+        resolution: "approved",
+        operatorId: "operator-2",
+      })
+    ).toThrow(/malformed/);
+  });
+
+  it("freshness_check fails closed on unparseable capture timestamps", () => {
+    const f = insertFixture(db, {
+      category: "operational",
+      capturedAt: "not-a-valid-date",
+    });
+    const freshness = evaluatePromotionChecks(db, TENANT, f.candidateId).find((c) => c.name === "freshness");
+    expect(freshness?.pass).toBe(false);
+    expect(freshness?.evidence).toMatchObject({ reason: "unparseable_capture_timestamp" });
+  });
+
+  it("promoteCandidate denies when ontology versioned records were removed", () => {
+    const f = insertFixture(db, { category: "operational" });
+    db.prepare(`DELETE FROM ontology_versioned_records WHERE record_id = ?`).run(f.candidateId);
+    const decision = promoteCandidate(db, {
+      candidateId: f.candidateId,
+      tenantId: TENANT,
+      actor: { id: "test-operator", role: "operator" },
+      category: "operational",
+    });
+    expect(decision.kind).toBe("denied");
+    if (decision.kind !== "denied") throw new Error("expected denied");
+    expect(decision.failedCheck).toBe("ontology");
   });
 
   it("demoteCandidate records supersession metadata when a replacement gold exists", () => {

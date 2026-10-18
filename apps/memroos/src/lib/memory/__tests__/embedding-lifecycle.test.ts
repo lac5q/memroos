@@ -219,4 +219,109 @@ describe("VAL-MEM-011: embedding lifecycle is provenance-linked and removable", 
     const result = getEmbeddingProvenance(db, "tenant1", "missing", "vector", "model-1", "local");
     expect(result).toBeNull();
   });
+
+  it("registerEmbeddingProvenance throws when the provenance table is missing", () => {
+    const bare = new Database(":memory:");
+    expect(() =>
+      registerEmbeddingProvenance(bare, {
+        canonicalId: "c1",
+        storeId: "vector",
+        sourceHash: "h1",
+        modelId: "m1",
+        provenance: "test",
+      })
+    ).toThrow(/memory_embedding_provenance table is missing/);
+    bare.close();
+  });
+
+  it("removeEmbeddingForCanonical tombstones deferred removability without calling adapters", () => {
+    const row = registerEmbeddingProvenance(db, {
+      tenantId: "tenant1",
+      canonicalId: "canon-deferred",
+      storeId: "vector",
+      sourceHash: "h1",
+      modelId: "model-1",
+      provenance: "ingress/test",
+      removability: "deferred",
+    });
+    const result = removeEmbeddingForCanonical(db, {
+      tenantId: "tenant1",
+      row,
+      erasureId: "erasure_deferred",
+    });
+    expect(result.status).toBe("tombstoned");
+    expect(result.reason).toBe("deferred_tombstoned");
+    const refreshed = getEmbeddingProvenance(db, "tenant1", "canon-deferred", "vector", "model-1", "local");
+    expect(refreshed?.lifecycleState).toBe("tombstoned");
+  });
+
+  it("removeEmbeddingForCanonical reports unavailable when adapter delete throws", () => {
+    const row = registerEmbeddingProvenance(db, {
+      tenantId: "tenant1",
+      canonicalId: "canon-throw",
+      storeId: "vector",
+      sourceHash: "h1",
+      modelId: "model-1",
+      provenance: "ingress/test",
+    });
+    const adapter: EmbeddingLifecycleAdapter = {
+      storeId: "vector",
+      delete() {
+        throw new Error("adapter offline");
+      },
+    };
+    const result = removeEmbeddingForCanonical(db, {
+      tenantId: "tenant1",
+      row,
+      erasureId: "erasure_throw",
+      adapter,
+    });
+    expect(result.status).toBe("unavailable");
+    expect(result.reason).toContain("adapter offline");
+  });
+
+  it("removeEmbeddingForCanonical fails on adapter store mismatch", () => {
+    const row = registerEmbeddingProvenance(db, {
+      tenantId: "tenant1",
+      canonicalId: "canon-mismatch",
+      storeId: "vector",
+      sourceHash: "h1",
+      modelId: "model-1",
+      provenance: "ingress/test",
+    });
+    const adapter: EmbeddingLifecycleAdapter = {
+      storeId: "embeddings",
+      delete: () => true,
+    };
+    const result = removeEmbeddingForCanonical(db, {
+      tenantId: "tenant1",
+      row,
+      erasureId: "erasure_mismatch",
+      adapter,
+    });
+    expect(result.status).toBe("failed");
+    expect(result.reason).toMatch(/adapter_store_mismatch/);
+  });
+
+  it("markEmbeddingStale is a no-op for removed provenance rows", () => {
+    const row = registerEmbeddingProvenance(db, {
+      tenantId: "tenant1",
+      canonicalId: "canon-removed",
+      storeId: "vector",
+      sourceHash: "h1",
+      modelId: "model-1",
+      provenance: "ingress/test",
+    });
+    db.prepare(
+      `UPDATE memory_embedding_provenance SET lifecycle_state = 'removed' WHERE id = ?`
+    ).run(row.id);
+    const stale = markEmbeddingStale(db, { tenantId: "tenant1", id: row.id, reason: "late stale" });
+    expect(stale?.lifecycleState).toBe("removed");
+  });
+
+  it("listEmbeddingProvenanceForCanonical returns empty when table is absent", () => {
+    const bare = new Database(":memory:");
+    expect(listEmbeddingProvenanceForCanonical(bare, "tenant1", "missing")).toEqual([]);
+    bare.close();
+  });
 });

@@ -108,6 +108,25 @@ describe('GET /api/memory-stats', () => {
     expect(body.recentFailures24h).toBe(1);
   });
 
+  it('returns 401 when session authentication fails', async () => {
+    const auth = await import('@/lib/auth/session');
+    vi.mocked(auth.authenticateUser).mockResolvedValueOnce(null);
+    const { GET } = await import('../route');
+    const res = await GET(new Request('http://localhost/api/memory-stats') as unknown as import('next/server').NextRequest);
+    expect(res.status).toBe(401);
+  });
+
+  it('treats invalid window query as all-time scope', async () => {
+    seedMessage('invalid-window', 0);
+    const { GET } = await import('../route');
+    const res = await GET(
+      new Request('http://localhost/api/memory-stats?window=invalid&workspace=all') as unknown as import('next/server').NextRequest
+    );
+    const body = await res.json();
+    expect(body.metrics.pendingUnconsolidated.scope.window).toBe('all');
+    expect(body.pendingUnconsolidated).toBe(1);
+  });
+
   it('filters message inventory by requested window and workspace', async () => {
     seedMessage('recent-local', 0, 'codex', new Date(Date.now() - 60 * 60 * 1000).toISOString());
     seedMessage('recent-remote', 0, 'zapier', new Date(Date.now() - 60 * 60 * 1000).toISOString());
