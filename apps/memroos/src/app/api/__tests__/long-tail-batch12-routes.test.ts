@@ -150,4 +150,61 @@ describe("long-tail batch 12 — API routes", () => {
     );
     expect(badBody.status).toBe(400);
   });
+
+  it("POST /api/write-rules/resolve requires agent auth", async () => {
+    mockAuthenticateAgent.mockReturnValue(null);
+    const { POST } = await import("../write-rules/resolve/route");
+    const res = await POST(
+      new Request(`${LOOPBACK}/api/write-rules/resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ spaceId: "spc-x", dataType: "note" }),
+      }) as never
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/write-rules/resolve returns a matched target for configured rules", async () => {
+    const { createSpace } = await import("@/lib/space");
+    const { createWriteRule } = await import("@/lib/write-rules");
+    const space = createSpace(testDb, {
+      tenantId: "default-tenant",
+      name: `b12-resolve-${randomUUID()}`,
+    });
+    createWriteRule(testDb, {
+      spaceId: space.id,
+      dataType: "decision_intent",
+      targetDocument: "decisions.md",
+      actorId: "op-1",
+    });
+    const { POST } = await import("../write-rules/resolve/route");
+    const res = await POST(
+      new Request(`${LOOPBACK}/api/write-rules/resolve`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-agent-id": "agent-1",
+        },
+        body: JSON.stringify({ spaceId: space.id, dataType: "decision_intent" }),
+      }) as never
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.matched).toBe(true);
+    expect(body.targetDocument).toBe("decisions.md");
+  });
+
+  it("POST /api/dsar/export rejects unauthenticated callers", async () => {
+    mockAuthenticateUser.mockResolvedValueOnce(null);
+    const { POST } = await import("../dsar/export/route");
+    const res = await POST(
+      new Request(`${LOOPBACK}/api/dsar/export`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: "user-1" }),
+      }) as never
+    );
+    expect([401, 403]).toContain(res.status);
+  });
 });

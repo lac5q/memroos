@@ -518,4 +518,74 @@ describe("VAL-ORCH-006 -- readViaMsiqAdapter and closeMsiqSession", () => {
     });
     expect(session.kind).toBe("foundry_only_unavailable");
   });
+
+  it("denies session open when scope identity is incomplete", async () => {
+    const { openMsiqSession } = await loadAdapter();
+    const result = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: { id: "user-1", role: "agent", capability: "", tenantId: "default-tenant" },
+      spaceId: "",
+      label: makeLabel(),
+      purpose: "memory_search",
+      beliefStage: "silver_candidate_claim",
+    });
+    expect(result.kind).toBe("denied");
+    if (result.kind === "denied") {
+      expect(result.reason).toBe("incomplete_scope");
+    }
+  });
+
+  it("denies reads when the session label fails memory policy at read time", async () => {
+    const { openMsiqSession, readViaMsiqAdapter } = await loadAdapter();
+    const session = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: makeActor(),
+      spaceId: "space-1",
+      label: {
+        visibility: "internal" as const,
+        policy: "sealed" as const,
+        domain: null,
+        sensitivity: null,
+      },
+      purpose: "memory_search",
+      beliefStage: "silver_candidate_claim",
+    });
+    if (session.kind !== "opened") throw new Error("session failed");
+    const result = readViaMsiqAdapter(
+      db,
+      { sessionToken: session.sessionToken, query: "hello", limit: 5 },
+      {
+        search: () => [{ id: "safe", content: "benign memory", score: 0.9 }],
+      }
+    );
+    expect(result.kind).toBe("denied");
+    if (result.kind === "denied") {
+      expect(result.reason).toBe("policy_denied");
+    }
+  });
+
+  it("serializes non-string write payloads before hashing", async () => {
+    const { openMsiqSession, writeViaMsiqAdapter } = await loadAdapter();
+    const session = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: makeActor(),
+      spaceId: "space-1",
+      label: makeLabel(),
+      purpose: "memory-promotion",
+      beliefStage: "silver_candidate_claim",
+    });
+    if (session.kind !== "opened") throw new Error("session failed");
+    const first = writeViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      idempotencyKey: "object-payload",
+      payload: { nested: { value: 42 }, note: "structured" },
+    });
+    const second = writeViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      idempotencyKey: "object-payload",
+      payload: { nested: { value: 42 }, note: "structured" },
+    });
+    expect(first.kind).toBe("applied");
+    expect(second.kind).toBe("replayed");
+  });
 });

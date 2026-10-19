@@ -171,6 +171,29 @@ describe("lookupSkillContract governance branches", () => {
     if (result?.kind !== "denied") throw new Error("narrow");
     expect(result.reason).toMatch(/trust level/i);
   });
+
+  it("surfaces under-review dispatch status in denials", async () => {
+    const { lookupSkillContract } = await import("../skill-lookup");
+    insertSkill(db, {
+      name: "review-skill",
+      dispatch_status: "review",
+      completeness_pct: 100,
+    });
+    const result = lookupSkillContract(db, "review-skill");
+    expect(result?.kind).toBe("denied");
+    if (result?.kind !== "denied") throw new Error("narrow");
+    expect(result.reason).toMatch(/under review/i);
+  });
+
+  it("denies not-found lookups with harness-specific messaging", async () => {
+    const { lookupSkillContract } = await import("../skill-lookup");
+    const result = lookupSkillContract(db, "missing-skill", {
+      sourceHarness: "codex",
+    });
+    expect(result?.kind).toBe("denied");
+    if (result?.kind !== "denied") throw new Error("narrow");
+    expect(result.reason).toMatch(/harness 'codex'/i);
+  });
 });
 
 describe("buildSkillEvidence extended shapes", () => {
