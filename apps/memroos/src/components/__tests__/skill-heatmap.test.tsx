@@ -173,6 +173,8 @@ describe("SkillHeatmap component", () => {
     fireEvent.mouseEnter(firstCell);
     // First cell should have ring class (hovered state)
     expect(firstCell.className).toMatch(/ring/);
+    fireEvent.mouseLeave(firstCell);
+    expect(firstCell.className).not.toMatch(/ring/);
     // Second alpha cell should NOT have ring class
     expect(cells[1].className).not.toMatch(/ring/);
   });
