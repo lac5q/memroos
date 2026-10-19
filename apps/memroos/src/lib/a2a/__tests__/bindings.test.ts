@@ -44,6 +44,16 @@ describe("A2A JSON-RPC bindings", () => {
     expect(res.error?.code).toBe(-32601);
   });
 
+  it("dispatches tasks/get when taskId is provided", async () => {
+    const res = await dispatchA2aJsonRpc(null, {
+      jsonrpc: "2.0",
+      id: "g1",
+      method: "tasks/get",
+      params: { taskId: "task-42" },
+    });
+    expect(res.result).toEqual({ id: "t1" });
+  });
+
   it("dispatches tasks/list for authenticated agents", async () => {
     const agent = {
       id: "agent-a",

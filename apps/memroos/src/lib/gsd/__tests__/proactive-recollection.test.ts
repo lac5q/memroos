@@ -202,6 +202,18 @@ describe("Phase 118 proactive recollection", () => {
     expect(skippedPack.receipt.authorization).toBe(skippedDecision.authorization);
   });
 
+  it("returns disabled skip when proactive recollection is turned off", () => {
+    const decision = evaluateRecollectionTrigger({
+      timing: "before_tool_use",
+      taskText: "format output",
+      projectId: "memroos",
+      enabled: false,
+    });
+    expect(decision.action).toBe("skip");
+    expect(decision.skipReason).toBe("disabled");
+    expect(planRecollectionQueries({ decision, taskText: "format output", projectId: "memroos" })).toEqual([]);
+  });
+
   it("breaks score ties lexicographically and drops empty budget slices", async () => {
     const { rankRecollectionCandidates, assembleRecollectionContextPack, evaluateRecollectionTrigger } =
       await import("../proactive-recollection");

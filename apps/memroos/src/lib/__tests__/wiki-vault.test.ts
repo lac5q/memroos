@@ -50,6 +50,10 @@ describe("wiki-vault helpers", () => {
     expect(resolveWikilink(wikiRoot, "missing-target")).toBeNull();
   });
 
+  it("resolves wiki root from trimmed override path", () => {
+    expect(getWikiRoot({ wikiRoot: `  ${wikiRoot}  ` })).toBe(path.resolve(wikiRoot));
+  });
+
   it("searches page content with snippets", () => {
     const hits = searchWikiPages(wikiRoot, "needle", 5);
     expect(hits).toHaveLength(1);

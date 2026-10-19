@@ -135,6 +135,14 @@ describe("SkillForge Analyzer", () => {
     db.close();
   });
 
+  it("uses default suggested fix for unknown failure class", () => {
+    const entries = [
+      makeEntry("skill-unknown", "failure", { query: "weird case", note: "no dispatch flags" }),
+    ];
+    const results = analyzeTelemetry(entries, config);
+    expect(results[0].patterns[0].suggestedFix).toContain("Review skill implementation");
+  });
+
   it("sorts results by confidence descending", () => {
     const entries = [
       makeEntry("skill-a", "failure", { query: "q1", expected: "a", actual: "b" }),
