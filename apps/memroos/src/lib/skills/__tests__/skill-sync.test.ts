@@ -2213,3 +2213,250 @@ describe("skill-sync additional error and edge coverage", () => {
   });
 });
 
+describe("skill-sync audit fallback and scanner edge coverage", () => {
+  it("pinVersion falls back to plain audit insert when hash-chain build fails", async () => {
+    const skillChainMod = await import("@/lib/audit/skill-chain");
+    const spy = vi.spyOn(skillChainMod, "buildSkillAuditEntry").mockImplementation(() => {
+      throw new Error("simulated chain failure");
+    });
+    try {
+      const { pinVersion } = await import("../skill-sync");
+      insertSkillRow({ name: "audit-fallback-pin", content_hash: "0".repeat(64) });
+      const pinned = pinVersion(db, {
+        skill_name: "audit-fallback-pin",
+        source_harness: "claude",
+        version: "1.0.0",
+        actor: "alice",
+      });
+      expect(pinned.version_pinned_to).toBe("1.0.0");
+      const audit = db
+        .prepare(
+          `SELECT event_type, metadata_json FROM audit_entries WHERE event_type = 'skill.sync.pinned' ORDER BY rowid DESC LIMIT 1`
+        )
+        .get() as { event_type: string; metadata_json: string };
+      expect(audit.event_type).toBe("skill.sync.pinned");
+      expect(JSON.parse(audit.metadata_json)).toBeTruthy();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("approveImportProposal propagates audit failures when plain insert is blocked", async () => {
+    const skillChainMod = await import("@/lib/audit/skill-chain");
+    const spy = vi.spyOn(skillChainMod, "buildSkillAuditEntry").mockImplementation(() => {
+      throw new Error("simulated chain failure");
+    });
+    db.exec(
+      `CREATE TRIGGER block_sync_audit_ins
+         BEFORE INSERT ON audit_entries
+       BEGIN
+         SELECT RAISE(ABORT, 'sync audit blocked');
+       END`
+    );
+    try {
+      const { createImportProposal, approveImportProposal } = await import("../skill-sync");
+      insertSkillRow({ name: "sync-audit-blocked", content_hash: "0".repeat(64) });
+      createImportProposal(db, {
+        source_harness: "claude",
+        detected: {
+          skill_name: "sync-audit-blocked",
+          source_harness: "claude",
+          version: "2.0.0",
+          raw_body: VALID_SKILL_MD("sync-audit-blocked", "2.0.0"),
+          content_hash: "1".repeat(64),
+        },
+        proposed_by: "scanner",
+      });
+      expect(() =>
+        approveImportProposal(db, {
+          skill_name: "sync-audit-blocked",
+          source_harness: "claude",
+          operator: "alice",
+        })
+      ).toThrow(/sync audit blocked/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("pinVersion completes when audit_entries table is missing", async () => {
+    const { pinVersion } = await import("../skill-sync");
+    insertSkillRow({ name: "no-audit-table", content_hash: "0".repeat(64) });
+    db.exec("DROP TABLE audit_entries");
+    const pinned = pinVersion(db, {
+      skill_name: "no-audit-table",
+      source_harness: "claude",
+      version: "1.0.0",
+      actor: "alice",
+    });
+    expect(pinned.version_pinned_to).toBe("1.0.0");
+  });
+
+  it("rollbackToPriorVersion restores raw_body from prior_raw_body in diff payload", async () => {
+    const { createImportProposal, approveImportProposal, rollbackToPriorVersion } =
+      await import("../skill-sync");
+    const bodyV1 = VALID_SKILL_MD("rollback-with-body", "1.0.0");
+    const bodyV2 = VALID_SKILL_MD("rollback-with-body", "2.0.0");
+    const hashV1 = "e".repeat(64);
+    const hashV2 = "f".repeat(64);
+    const id = insertSkillRow({
+      name: "rollback-with-body",
+      content_hash: hashV1,
+      version: "1.0.0",
+      raw_body: bodyV1,
+    });
+    createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "rollback-with-body",
+        source_harness: "claude",
+        version: "2.0.0",
+        raw_body: bodyV2,
+        content_hash: hashV2,
+      },
+      proposed_by: "scanner",
+      diff_payload: { prior_raw_body: bodyV1 },
+    });
+    approveImportProposal(db, {
+      skill_name: "rollback-with-body",
+      source_harness: "claude",
+      operator: "alice",
+    });
+    db.prepare(
+      `UPDATE skill_sync_state
+          SET pending_diff_payload = ?
+        WHERE skill_name = ? AND source_harness = ?`
+    ).run(
+      JSON.stringify({ prior_raw_body: bodyV1 }),
+      "rollback-with-body",
+      "claude"
+    );
+    rollbackToPriorVersion(db, {
+      skill_name: "rollback-with-body",
+      source_harness: "claude",
+      operator: "alice",
+    });
+    const reg = db
+      .prepare(`SELECT raw_body, content_hash, version FROM skill_registry WHERE id = ?`)
+      .get(id) as { raw_body: string; content_hash: string; version: string };
+    expect(reg.raw_body).toBe(bodyV1);
+    expect(reg.content_hash).toBe(hashV1);
+    expect(reg.version).toBe("1.0.0");
+  });
+
+  it("clearVersionPin throws when sync_state row disappears after update", async () => {
+    const { pinVersion, clearVersionPin, SkillSyncError } = await import("../skill-sync");
+    insertSkillRow({ name: "vanish-unpin", content_hash: "0".repeat(64) });
+    pinVersion(db, {
+      skill_name: "vanish-unpin",
+      source_harness: "claude",
+      version: "1.0.0",
+      actor: "alice",
+    });
+    db.exec(
+      `CREATE TRIGGER skill_sync_state_vanish_on_unpin
+         AFTER UPDATE ON skill_sync_state
+         WHEN NEW.skill_name = 'vanish-unpin'
+       BEGIN
+         DELETE FROM skill_sync_state WHERE skill_name = NEW.skill_name AND source_harness = NEW.source_harness;
+       END`
+    );
+    expect(() =>
+      clearVersionPin(db, {
+        skill_name: "vanish-unpin",
+        source_harness: "claude",
+        actor: "alice",
+      })
+    ).toThrow(/row vanished/);
+    expect(SkillSyncError).toBeTruthy();
+  });
+
+  it("rollbackToPriorVersion throws when sync_state row disappears after rollback", async () => {
+    const { createImportProposal, approveImportProposal, rollbackToPriorVersion } =
+      await import("../skill-sync");
+    insertSkillRow({
+      name: "vanish-rollback",
+      content_hash: "0".repeat(64),
+      version: "1.0.0",
+      raw_body: VALID_SKILL_MD("vanish-rollback", "1.0.0"),
+    });
+    createImportProposal(db, {
+      source_harness: "claude",
+      detected: {
+        skill_name: "vanish-rollback",
+        source_harness: "claude",
+        version: "2.0.0",
+        raw_body: VALID_SKILL_MD("vanish-rollback", "2.0.0"),
+        content_hash: "1".repeat(64),
+      },
+      proposed_by: "scanner",
+    });
+    approveImportProposal(db, {
+      skill_name: "vanish-rollback",
+      source_harness: "claude",
+      operator: "alice",
+    });
+    db.exec(
+      `CREATE TRIGGER skill_sync_state_vanish_on_rollback
+         AFTER UPDATE ON skill_sync_state
+         WHEN NEW.skill_name = 'vanish-rollback'
+       BEGIN
+         DELETE FROM skill_sync_state WHERE skill_name = NEW.skill_name AND source_harness = NEW.source_harness;
+       END`
+    );
+    expect(() =>
+      rollbackToPriorVersion(db, {
+        skill_name: "vanish-rollback",
+        source_harness: "claude",
+        operator: "alice",
+      })
+    ).toThrow(/row vanished/);
+  });
+});
+
+describe("detectHarnessSkills additional filesystem branches", () => {
+  it("treats blank version frontmatter as null and empty name frontmatter as parse error", async () => {
+    const { detectHarnessSkills } = await import("../skill-sync");
+    const harnessRoots = buildHarnessRoots(TMP_ROOT);
+    fs.mkdirSync(harnessRoots.codex, { recursive: true });
+    fs.writeFileSync(
+      path.join(harnessRoots.codex, "blank-version.md"),
+      "---\nname: blank-version\nversion:\n---\n\n# Body\n",
+      "utf8"
+    );
+    fs.writeFileSync(
+      path.join(harnessRoots.codex, "blank-name.md"),
+      "---\nname:\nversion: 1.0.0\n---\n\n# Body\n",
+      "utf8"
+    );
+    const detected = detectHarnessSkills({ roots: harnessRoots });
+    const blankVersion = detected.entries.find((e) => e.skill_name === "blank-version");
+    expect(blankVersion?.version).toBeNull();
+    const blankName = detected.entries.find((e) => e.skill_name === "blank-name");
+    expect(blankName?.parse_error).toBeTruthy();
+  });
+
+  it("diffSkills treats null registry hash as a change rather than no_change", async () => {
+    const { diffSkills } = await import("../skill-sync");
+    const detectedHash = "b".repeat(64);
+    const diff = diffSkills(
+      {
+        skill_name: "null-hash-existing",
+        source_harness: "claude",
+        content_hash: null,
+        version: "1.0.0",
+        raw_body: VALID_SKILL_MD("null-hash-existing", "1.0.0"),
+      },
+      {
+        skill_name: "null-hash-existing",
+        source_harness: "claude",
+        content_hash: detectedHash,
+        version: "2.0.0",
+        raw_body: VALID_SKILL_MD("null-hash-existing", "2.0.0"),
+      }
+    );
+    expect(diff.kind).toBe("change");
+    expect(diff.current_hash).toBeNull();
+  });
+});
+
