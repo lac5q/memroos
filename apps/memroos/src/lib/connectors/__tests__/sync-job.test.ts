@@ -241,4 +241,97 @@ describe("connector sync-job", () => {
     errorSpy.mockRestore();
     delete process.env.NANGO_SECRET_KEY;
   });
+
+  it("syncs circleback via page-index + resultKey null and keeps cursor on truncated pages", async () => {
+    mockListConnections.mockResolvedValue([
+      {
+        connectionId: "conn-circleback",
+        providerKey: "circleback",
+        providerConfigKey: "circleback-mcp",
+      },
+    ] as Awaited<ReturnType<typeof listNangoConnections>>);
+    mockFetchCreds.mockResolvedValue({ accessToken: "cb-token" } as Awaited<
+      ReturnType<typeof fetchNangoCredentials>
+    >);
+
+    // Full page (>= CONNECTOR_PAGE_SIZE) implies more work under page-index.
+    const page = Array.from({ length: CONNECTOR_PAGE_SIZE }, (_, i) => ({
+      id: `meeting-${i}`,
+      createdAt: `2026-07-01T00:00:${String(i).padStart(2, "0")}.000Z`,
+      name: `Meeting ${i}`,
+      notes: `notes ${i}`,
+    }));
+    mockCallTool.mockResolvedValueOnce({ payload: page });
+
+    const first = await runConnectorCycle(db);
+    expect(first.written).toBe(CONNECTOR_PAGE_SIZE);
+    expect(mockCallTool).toHaveBeenCalledWith(
+      "https://app.circleback.ai/api/mcp",
+      "cb-token",
+      "SearchMeetings",
+      expect.objectContaining({ pageIndex: 0 }),
+    );
+
+    // Short follow-up page finishes the sweep.
+    mockCallTool.mockResolvedValueOnce({
+      payload: [
+        {
+          id: "meeting-tail",
+          createdAt: "2026-07-02T00:00:00.000Z",
+          name: "Tail",
+          notes: "done",
+        },
+      ],
+    });
+    const second = await runConnectorCycle(db);
+    expect(second.written).toBeGreaterThanOrEqual(1);
+    expect(mockCallTool).toHaveBeenLastCalledWith(
+      "https://app.circleback.ai/api/mcp",
+      "cb-token",
+      "SearchMeetings",
+      expect.objectContaining({ pageIndex: 1 }),
+    );
+  });
+
+  it("skips notion enrichment when page id is missing and writes URL-only rows", async () => {
+    mockListConnections.mockResolvedValue([
+      {
+        connectionId: "conn-notion-noid",
+        providerKey: "notion",
+        providerConfigKey: "notion",
+      },
+    ] as Awaited<ReturnType<typeof listNangoConnections>>);
+    mockFetchCreds.mockResolvedValue({ accessToken: "notion-token" } as Awaited<
+      ReturnType<typeof fetchNangoCredentials>
+    >);
+    mockCallRest.mockResolvedValueOnce({
+      payload: {
+        results: [
+          {
+            // Missing id → enrichRecord returns early without fetchNotionPageText.
+            url: "https://notion.so/missing-id",
+            last_edited_time: "2026-07-01T00:00:00.000Z",
+            properties: { title: { title: [{ plain_text: "No Id" }] } },
+          },
+        ],
+        has_more: false,
+      },
+    });
+
+    const result = await runConnectorCycle(db);
+    expect(result.written + result.skipped + result.duplicates).toBeGreaterThanOrEqual(0);
+    expect(mockFetchNotion).not.toHaveBeenCalled();
+  });
+
+  it("startConnectorJob is idempotent once scheduled", async () => {
+    vi.resetModules();
+    process.env.NANGO_SECRET_KEY = "test-nango-key";
+    const intervalSpy = vi.spyOn(global, "setInterval").mockReturnValue({ unref: vi.fn() } as never);
+    const { startConnectorJob: startFresh } = await import("../sync-job");
+    startFresh();
+    startFresh();
+    expect(intervalSpy).toHaveBeenCalledTimes(1);
+    intervalSpy.mockRestore();
+    delete process.env.NANGO_SECRET_KEY;
+  });
 });

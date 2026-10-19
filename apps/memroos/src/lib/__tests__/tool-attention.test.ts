@@ -439,4 +439,170 @@ describe("getToolAttention", () => {
     expect(data.health.catalog).toBe("missing");
     expect(data.health.outcomes).toBe("missing");
   });
+
+  it("marks gitnexus missing when the MCP entry is null and registry is absent", () => {
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tool-attention-gitnexus-missing-"));
+    const catalogPath = path.join(tempRoot, "catalog.json");
+    const outcomesPath = path.join(tempRoot, "outcomes.jsonl");
+    fs.writeFileSync(catalogPath, JSON.stringify({ capabilities: [], sources: [] }));
+    fs.writeFileSync(outcomesPath, "");
+    // Key present so mcpCapabilities emits the server; null value makes gitnexusStatus hasMcp=false.
+    fs.writeFileSync(
+      path.join(tempRoot, ".mcp.json"),
+      JSON.stringify({ mcpServers: { gitnexus: null } }),
+    );
+
+    vi.stubEnv("MEMROOS_ROOT", tempRoot);
+    vi.stubEnv("HOME", path.join(tempRoot, "home-empty"));
+    vi.stubEnv("TOOL_ATTENTION_CATALOG", catalogPath);
+    vi.stubEnv("TOOL_ATTENTION_OUTCOMES", outcomesPath);
+    vi.stubEnv("SKILLS_PATH", path.join(tempRoot, "no-skills"));
+    vi.stubEnv("MEMROOS_OPTIONAL_CAPABILITIES", "gitnexus");
+    vi.stubEnv("GITNEXUS_REGISTRY", path.join(tempRoot, "missing-registry.json"));
+
+    const data = getToolAttention("gitnexus", 10);
+    const gitnexus = data.capabilities.find((item) => item.id === "mcp-server:gitnexus");
+    expect(gitnexus?.status).toBe("missing");
+  });
+
+  it("treats agent-lightning as degraded when package.json scripts are unreadable", () => {
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tool-attention-apo-catch-"));
+    const catalogPath = path.join(tempRoot, "catalog.json");
+    const outcomesPath = path.join(tempRoot, "outcomes.jsonl");
+    const proposals = path.join(tempRoot, "proposals");
+    fs.mkdirSync(path.join(tempRoot, "apps", "memroos"), { recursive: true });
+    fs.mkdirSync(proposals, { recursive: true });
+    // Unreadable / invalid package.json triggers the catch in agentLightningStatus.
+    fs.writeFileSync(path.join(tempRoot, "apps", "memroos", "package.json"), "{not-json");
+    fs.writeFileSync(catalogPath, JSON.stringify({ capabilities: [], sources: [] }));
+    fs.writeFileSync(outcomesPath, "");
+
+    vi.stubEnv("MEMROOS_ROOT", tempRoot);
+    vi.stubEnv("HOME", tempRoot);
+    vi.stubEnv("TOOL_ATTENTION_CATALOG", catalogPath);
+    vi.stubEnv("TOOL_ATTENTION_OUTCOMES", outcomesPath);
+    vi.stubEnv("SKILLS_PATH", path.join(tempRoot, "no-skills"));
+    vi.stubEnv("MEMROOS_OPTIONAL_CAPABILITIES", "agent-lightning");
+    vi.stubEnv("APO_PROPOSALS_PATH", proposals);
+    vi.stubEnv("APO_CRON_LOG_PATH", path.join(tempRoot, "missing-cron.log"));
+
+    const data = getToolAttention("agent lightning", 20);
+    const agentLightning = data.capabilities.find((item) => item.id === "capability:agent-lightning");
+    expect(agentLightning?.status).toBe("degraded");
+  });
+
+  it("skips blank toolIds, tolerates corrupt catalog/outcomes, and rewrites home paths", () => {
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tool-attention-edges-"));
+    // Home and outside must be OUTSIDE MEMROOS_ROOT so publicPath hits ~/ and basename branches.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "tool-attention-home-"));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "tool-attention-outside-"));
+    fs.mkdirSync(path.join(home, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(home, "private"), { recursive: true });
+
+    const catalogPath = path.join(tempRoot, "catalog.json");
+    const outcomesPath = path.join(tempRoot, "outcomes.jsonl");
+    fs.writeFileSync(
+      catalogPath,
+      JSON.stringify({
+        capabilities: [
+          {
+            id: "skill:pathy",
+            name: "pathy",
+            type: "mcp-tool",
+            source: "test",
+            description: "paths",
+            status: "available",
+            tags: [],
+            useWhen: [],
+            topLevel: false,
+            loadCommand: `node ${path.join(home, "bin", "load.js")}`,
+          },
+        ],
+        sources: [
+          {
+            id: "http-src",
+            label: "remote",
+            type: "external",
+            path: "https://example.com/catalog.json",
+            status: "available",
+          },
+          {
+            id: "rel-src",
+            label: "relative",
+            type: "local",
+            path: "relative/path.json",
+            status: "available",
+          },
+          {
+            id: "home-src",
+            label: "home",
+            type: "local",
+            path: path.join(home, "private", "file.json"),
+            status: "available",
+          },
+          {
+            id: "basename-src",
+            label: "outside",
+            type: "local",
+            path: path.join(outside, "secret.json"),
+            status: "available",
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      outcomesPath,
+      [
+        JSON.stringify({ timestamp: "t0", toolId: "", outcome: "helped", metadata: { task_type: "x" } }),
+        JSON.stringify({ timestamp: "t1", toolId: "skill:pathy", outcome: "partial", metadata: { task_type: "x" } }),
+      ].join("\n") + "\n",
+    );
+
+    vi.stubEnv("MEMROOS_ROOT", tempRoot);
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("TOOL_ATTENTION_CATALOG", catalogPath);
+    vi.stubEnv("TOOL_ATTENTION_OUTCOMES", outcomesPath);
+    vi.stubEnv("SKILLS_PATH", path.join(tempRoot, "no-skills"));
+
+    const data = getToolAttention("", 50);
+    expect(data.sources.find((s) => s.id === "http-src")?.path).toBe("https://example.com/catalog.json");
+    expect(data.sources.find((s) => s.id === "rel-src")?.path).toBe("relative/path.json");
+    expect(data.sources.find((s) => s.id === "home-src")?.path).toMatch(/^~\//);
+    expect(data.sources.find((s) => s.id === "basename-src")?.path).toBe("secret.json");
+    expect(data.capabilities.find((c) => c.id === "skill:pathy")?.loadCommand).toContain("~/");
+
+    const similar = getSimilarTaskRecommendations({ task_type: "x" }, 5);
+    expect(similar.recommendations.some((r) => r.capabilityId === "skill:pathy")).toBe(true);
+
+    // Corrupt outcomes JSONL → empty recent outcomes (catch path).
+    fs.writeFileSync(outcomesPath, "{not-json-line\n");
+    expect(getToolAttention("", 5).recentOutcomes).toEqual([]);
+
+    // Corrupt catalog JSON → empty curated capabilities.
+    fs.writeFileSync(catalogPath, "{bad-catalog");
+    const degraded = getToolAttention("", 5);
+    expect(degraded.capabilities.every((c) => c.id !== "skill:pathy")).toBe(true);
+
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  it("degrades skills source when SKILLS_PATH cannot be read", () => {
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tool-attention-skills-catch-"));
+    const catalogPath = path.join(tempRoot, "catalog.json");
+    const outcomesPath = path.join(tempRoot, "outcomes.jsonl");
+    const skillsPath = path.join(tempRoot, "skills-file");
+    fs.writeFileSync(catalogPath, JSON.stringify({ capabilities: [], sources: [] }));
+    fs.writeFileSync(outcomesPath, "");
+    // SKILLS_PATH exists but is a file — readdirSync throws → degraded source.
+    fs.writeFileSync(skillsPath, "not-a-directory");
+
+    vi.stubEnv("MEMROOS_ROOT", tempRoot);
+    vi.stubEnv("TOOL_ATTENTION_CATALOG", catalogPath);
+    vi.stubEnv("TOOL_ATTENTION_OUTCOMES", outcomesPath);
+    vi.stubEnv("SKILLS_PATH", skillsPath);
+
+    const data = getToolAttention("", 5);
+    expect(data.sources.find((s) => s.id === "skills-path")?.status).toBe("degraded");
+  });
 });
