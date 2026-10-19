@@ -126,8 +126,7 @@ describe("BELIEF-05 promotion eval CI canary", () => {
   it("runBeliefPromotionEvalSuite captures handler exceptions as failed cases", async () => {
     db = new Database(":memory:");
     initSchema(db);
-    db.close();
-    db = new Database(":memory:");
+    db.exec("DROP TABLE agent_memory_candidates");
 
     const run = await runBeliefPromotionEvalSuite({ mode: "gold", db });
     expect(run.pass).toBe(false);

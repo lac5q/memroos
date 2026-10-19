@@ -1027,6 +1027,50 @@ describe("graph-catchup incremental checkpointing", () => {
     expect(checkpoint.episodicLastId).toBe(0);
   });
 
+  it("treats vector items with createdAt but no cursor timestamp as after cursor", () => {
+    expect(
+      isAfterVectorCursor(
+        { id: "vector:new-only-date", createdAt: "2026-07-17T12:00:00.000Z" },
+        { vectorLastCreatedAt: null, vectorLastId: "zzz" }
+      )
+    ).toBe(true);
+  });
+
+  it("defaultFetchVectorMemories unwraps mem0 list shapes", async () => {
+    process.env.NEO4J_PASSWORD = "test-neo4j-pass";
+    delete process.env.QDRANT_URL;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          memories: [{ id: "m1", memory: "hello from mem0", user_id: "luis" }],
+        })
+      )
+    );
+    const summary = await runGraphCatchup(testDb, {
+      skipEpisodic: true,
+      useQdrantScroll: false,
+      now: new Date("2026-07-17T12:00:00.000Z"),
+      projectFact: async () => undefined,
+      sleep: async () => undefined,
+      log: () => undefined,
+    });
+    expect(summary.considered).toBeGreaterThanOrEqual(1);
+  });
+
+  it("scrollQdrantPoints throws on non-OK HTTP responses", async () => {
+    const fetchMock = vi.fn(async () => new Response("bad", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    let caught: unknown;
+    try {
+      await scrollQdrantPoints(null, 5, { url: "http://localhost:6333", collection: "mem" });
+    } catch (error) {
+      caught = error;
+    }
+    expect(String(caught)).toMatch(/Qdrant scroll failed: HTTP 503/);
+    vi.unstubAllGlobals();
+  });
+
   it("uses built-in sleep/log defaults when options omit overrides", async () => {
     process.env.NEO4J_PASSWORD = "test-neo4j-pass";
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);

@@ -2,7 +2,7 @@
 import crypto from "crypto";
 
 import Database from "better-sqlite3";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { initSchema } from "../db-schema";
 import {
@@ -257,5 +257,97 @@ describe("belief promotion batch11", () => {
       actor: { id: "operator", role: "operator" },
     });
     expect(demote.decisionId).toBeTruthy();
+  });
+
+  it("parseJsonRecord treats JSON arrays in metadata as empty objects", () => {
+    const { candidateId } = insertMinimalCandidate(db);
+    db.prepare(`UPDATE agent_memory_candidates SET metadata_json = '["not","metadata"]' WHERE id = ?`).run(
+      candidateId
+    );
+    promoteCandidate(db, {
+      candidateId,
+      tenantId: TENANT,
+      actor: { id: "operator", role: "operator" },
+      category: "operational",
+    });
+    expect(
+      demoteCandidate(db, {
+        candidateId,
+        tenantId: TENANT,
+        reason: "array_metadata",
+        actor: { id: "operator", role: "operator" },
+      }).decisionId
+    ).toBeTruthy();
+  });
+
+  it("promoteCandidate throws when the gold UPDATE affects zero rows", () => {
+    const { candidateId } = insertMinimalCandidate(db);
+    const originalPrepare = db.prepare.bind(db);
+    vi.spyOn(db, "prepare").mockImplementation((sql: unknown) => {
+      const stmt = originalPrepare(sql as string);
+      if (typeof sql === "string" && sql.includes("belief_stage = 'gold_operational_truth'")) {
+        vi.spyOn(stmt, "run").mockReturnValue({ changes: 0 } as never);
+      }
+      return stmt;
+    });
+    expect(() =>
+      promoteCandidate(db, {
+        candidateId,
+        tenantId: TENANT,
+        actor: { id: "operator", role: "operator" },
+        category: "operational",
+      })
+    ).toThrow(/expected 1/);
+    vi.restoreAllMocks();
+  });
+
+  it("demoteCandidate throws when the demotion UPDATE affects zero rows", () => {
+    const { candidateId } = insertMinimalCandidate(db);
+    const originalPrepare = db.prepare.bind(db);
+    vi.spyOn(db, "prepare").mockImplementation((sql: unknown) => {
+      const stmt = originalPrepare(sql as string);
+      if (
+        typeof sql === "string" &&
+        sql.includes("belief_stage = ?") &&
+        sql.includes("demotion_reason = ?")
+      ) {
+        vi.spyOn(stmt, "run").mockReturnValue({ changes: 0 } as never);
+      }
+      return stmt;
+    });
+    expect(() =>
+      demoteCandidate(db, {
+        candidateId,
+        tenantId: TENANT,
+        reason: "zero_row_demote",
+        actor: { id: "operator", role: "operator" },
+      })
+    ).toThrow(/expected 1/);
+    vi.restoreAllMocks();
+  });
+
+  it("resolveReview rethrows when approved admission fails for a non-ontology gate", () => {
+    const { candidateId, captureId } = insertMinimalCandidate(db);
+    const queued = promoteCandidate(db, {
+      candidateId,
+      tenantId: TENANT,
+      actor: { id: "operator", role: "operator" },
+      category: "pricing",
+    });
+    expect(queued.kind).toBe("queued_for_review");
+    if (queued.kind !== "queued_for_review") throw new Error("expected queue");
+    db.prepare(`UPDATE agent_session_captures SET captured_at = ? WHERE id = ?`).run(
+      "1999-01-01T00:00:00.000Z",
+      captureId
+    );
+    expect(() =>
+      resolveReview(db, {
+        queueId: queued.queueId,
+        tenantId: TENANT,
+        resolution: "approved",
+        operatorId: "operator-2",
+        category: "pricing",
+      })
+    ).toThrow(/review-approved candidate failed admission gate/);
   });
 });

@@ -1,4 +1,5 @@
 // @vitest-environment node
+import crypto from "crypto";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -305,6 +306,153 @@ describe("erasure batch11 — adapter branches", () => {
     });
     const cacheOutcomes = report.storeOutcomes.filter((o) => o.storeId === "cache");
     expect(cacheOutcomes.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("skips FTS purge rows when the backing message row is already gone", async () => {
+    const database = freshDb();
+    const messageId = Number(
+      database
+        .prepare(
+          `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+           VALUES (?, ?, ?, ?, ?, ?, 'internal', 'indexable')`
+        )
+        .run("sess-fts-ghost", "proj", "agent", "user", "fts ghost body", "2026-01-01T00:00:00Z")
+        .lastInsertRowid
+    );
+    database.prepare(`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`).run();
+    database.prepare(`DELETE FROM messages WHERE id = ?`).run(messageId);
+    const identity = buildCanonicalIdentity("fts ghost body", "message", "ingress", "fts", {
+      tenantId: "default-tenant",
+    });
+    identity.derivatives = [
+      {
+        storeId: "fts",
+        sourceHash: identity.canonicalHash,
+        provenance: "test",
+        metadata: { message_id: messageId },
+      },
+    ];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    expect(report.storeOutcomes.find((o) => o.storeId === "fts")?.status).toBe("zero_match");
+  });
+
+  it("reports graph zero_match when graph is not linked on the identity", async () => {
+    const database = freshDb();
+    const prev = process.env.NEO4J_PASSWORD;
+    process.env.NEO4J_PASSWORD = "secret";
+    try {
+      const identity = buildCanonicalIdentity("graph not linked", "message", "ingress", "message", {
+        tenantId: "default-tenant",
+      });
+      const report = await coordinateErasure(database, identity, {
+        tenantId: "default-tenant",
+        actorId: "tester",
+        scope: { tenantId: "default-tenant" },
+      });
+      expect(report.storeOutcomes.find((o) => o.storeId === "graph")?.reason).toBe("not_linked");
+    } finally {
+      if (prev === undefined) delete process.env.NEO4J_PASSWORD;
+      else process.env.NEO4J_PASSWORD = prev;
+    }
+  });
+
+  it("tombstones platform rows resolved via message_row_id", async () => {
+    const database = freshDb();
+    ensureMessageMemorySchema(database);
+    const messageId = Number(
+      database
+        .prepare(
+          `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+           VALUES (?, ?, ?, ?, ?, ?, 'internal', 'indexable')`
+        )
+        .run("sess-platform", "proj", "agent", "user", "platform row body", "2026-01-01T00:00:00Z")
+        .lastInsertRowid
+    );
+    const platformId = `platform-${crypto.randomUUID()}`;
+    database
+      .prepare(
+        `INSERT INTO platform_message_memory
+         (id, dedupe_key, provider, workspace_id, channel_id, provider_message_id, author_id,
+          content, content_hash, message_timestamp, message_row_id, metadata, created_at, updated_at)
+         VALUES (?, ?, 'slack', 'ws', 'ch', 'pm-1', 'author', ?, ?, '2026-01-01T00:00:00Z', ?, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
+      )
+      .run(
+        platformId,
+        `dedupe-${platformId}`,
+        "platform row body",
+        crypto.createHash("sha256").update("platform row body").digest("hex"),
+        messageId
+      );
+    const identity = buildCanonicalIdentity("platform row body", "message", "ingress", "platform", {
+      tenantId: "default-tenant",
+    });
+    identity.derivatives = [
+      { storeId: "platform", sourceHash: identity.canonicalHash, provenance: "test", metadata: { message_id: messageId } },
+    ];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    expect(report.storeOutcomes.find((o) => o.storeId === "platform")?.status).toBe("tombstoned");
+    const row = database
+      .prepare(`SELECT content FROM platform_message_memory WHERE id = ?`)
+      .get(platformId) as { content: string };
+    expect(row.content).toBe("[erased]");
+  });
+
+  it("purges vector store via synthesized provenance when no ledger rows exist", async () => {
+    const database = freshDb();
+    const identity = buildCanonicalIdentity("vector synth", "message", "ingress", "vector", {
+      tenantId: "default-tenant",
+    });
+    identity.derivatives = [{ storeId: "vector", sourceHash: identity.canonicalHash, provenance: "test" }];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    expect(report.storeOutcomes.find((o) => o.storeId === "vector")?.reason).toMatch(/synthesized_provenance_purged|embedding_removed/);
+  });
+
+  it("tombstones qmd derivatives without touching underlying files", async () => {
+    const database = freshDb();
+    const identity = buildCanonicalIdentity("qmd note", "vault", "ingress", "qmd", {
+      tenantId: "default-tenant",
+    });
+    identity.derivatives = [{ storeId: "qmd", sourceHash: identity.canonicalHash, provenance: "test" }];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    expect(report.storeOutcomes.find((o) => o.storeId === "qmd")?.reason).toBe("qmd_index_tombstoned");
+  });
+
+  it("marks erasure failed when a linked store adapter throws", async () => {
+    const database = freshDb();
+    const { registerErasureStoreAdapter } = await import("../erasure");
+    registerErasureStoreAdapter({
+      storeId: "context",
+      async erase() {
+        throw new Error("context adapter exploded");
+      },
+    });
+    const identity = buildCanonicalIdentity("context fail", "message", "ingress", "context", {
+      tenantId: "default-tenant",
+    });
+    identity.derivatives = [{ storeId: "context", sourceHash: identity.canonicalHash, provenance: "test" }];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    expect(report.status).toBe("failed");
+    expect(report.storeOutcomes.find((o) => o.storeId === "context")?.reason).toMatch(/exploded/);
   });
 
   it("reports fts unavailable when messages_fts is missing but fts is linked", async () => {

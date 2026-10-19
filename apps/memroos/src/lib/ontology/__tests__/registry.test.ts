@@ -588,6 +588,82 @@ describe("ontology registry validation", () => {
     ).toThrow(/Pack relationship is invalid/);
   });
 
+  it("publishOntologyVersion accepts semver pre-release identifiers", async () => {
+    const { mod, ontology } = await canonical();
+    const document = nextDocument(mod, ontology);
+    document.version = "1.2.0-beta.1";
+    const hash = mod.canonicalContentHash(document);
+    const published = mod.publishOntologyVersion(db, {
+      ...document,
+      actor: "operator",
+      suppliedHash: hash,
+      projections: mod.ONTOLOGY_PROJECTIONS.map((projection) => ({ projection, contentHash: hash })),
+    });
+    expect(published.version).toBe("1.2.0-beta.1");
+  });
+
+  it("updateOntologyProjection rejects unknown projections and statuses", async () => {
+    const { mod, ontology } = await canonical();
+    expect(() =>
+      mod.updateOntologyProjection(db, {
+        ontologyId: ontology.ontologyId,
+        version: ontology.version,
+        projection: "unknown_projection" as never,
+        contentHash: ontology.contentHash,
+        status: "current",
+        actor: "operator",
+      })
+    ).toThrow(/Unknown projection/);
+    expect(() =>
+      mod.updateOntologyProjection(db, {
+        ontologyId: ontology.ontologyId,
+        version: ontology.version,
+        projection: "git",
+        contentHash: ontology.contentHash,
+        status: "bogus" as never,
+        actor: "operator",
+      })
+    ).toThrow(/Unknown projection status/);
+  });
+
+  it("registerDomainPack rejects self-referential dependencies", async () => {
+    const { mod, ontology } = await canonical();
+    const base = mod.registerDomainPack(db, {
+      namespace: "self.dep",
+      owner: "ops",
+      version: "1.0.0",
+      sourceHash: SOURCE_HASH,
+      provenanceSummary: {
+        sourceId: "src_self_dep",
+        classification: "internal",
+        importedAt: "2026-07-12T00:00:00Z",
+        references: ["ref_self_dep"],
+      },
+      ontology: { id: ontology.ontologyId, version: ontology.version, contentHash: ontology.contentHash },
+      types: [packType(ontology, "self.dep.child")],
+      actor: "operator",
+    });
+    mod.transitionDomainPack(db, { packId: base.id, toState: "approved", actor: "operator" });
+    expect(() =>
+      mod.registerDomainPack(db, {
+        namespace: "self.dep",
+        owner: "ops",
+        version: "1.0.0",
+        sourceHash: SOURCE_HASH,
+        provenanceSummary: {
+          sourceId: "src_self_dep_2",
+          classification: "internal",
+          importedAt: "2026-07-12T00:00:00Z",
+          references: ["ref_self_dep_2"],
+        },
+        ontology: base.ontology,
+        dependencies: [{ namespace: "self.dep", version: "1.0.0", sourceHash: SOURCE_HASH }],
+        types: [packType(ontology, "self.dep.other")],
+        actor: "operator",
+      })
+    ).toThrow(/cannot depend on itself/);
+  });
+
   it("VAL-ONTO-009 rolls back ontology publication when its paired audit row fails", async () => {
     const { mod, ontology } = await canonical();
     db.exec(`

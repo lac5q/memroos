@@ -277,6 +277,71 @@ describe("VAL-MEM-025: consolidation failure and replay are safe", () => {
     expect(result.failureReason).toBe("missing_scope_purpose");
   });
 
+  it("rejects invalid now timestamps via toIso", async () => {
+    const database = freshDb();
+    const source = makeSource({ canonicalId: "canon_bad_now" });
+    let caught: unknown;
+    try {
+      await runConsolidationCycle(database, {
+        runKey: "run-bad-now",
+        scope: { tenantId: "default-tenant", purpose: "recall" },
+        sources: [source],
+        actorId: "operator",
+        now: new Date(Number.NaN),
+      });
+    } catch (error) {
+      caught = error;
+    }
+    expect(String(caught)).toMatch(/Invalid UTC timestamp/);
+  });
+
+  it("records vault_write_failed when vault artifact write throws", async () => {
+    vi.resetModules();
+    const vaultWriter = await import("@/lib/vault/writer");
+    vi.spyOn(vaultWriter, "writeVaultArtifact").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+    const database = freshDb();
+    const source = makeSource({ canonicalId: "canon_vault_write_fail" });
+    const { runConsolidationCycle: runCycle } = await import("../consolidation");
+    const result = await runCycle(database, {
+      runKey: "run-vault-write-fail",
+      scope: { tenantId: "default-tenant", purpose: "recall" },
+      sources: [source],
+      actorId: "operator",
+    });
+    vi.restoreAllMocks();
+    expect(result.status).toBe("failed");
+    expect(result.failureReason).toMatch(/vault_write_failed:disk full/);
+  });
+
+  it("marks consolidation incomplete when audit receipt write fails after success", async () => {
+    vi.resetModules();
+    const audit = await import("@/lib/audit/memory-chain");
+    const real = audit.writeChainedMemoryAuditEntry;
+    let calls = 0;
+    vi.spyOn(audit, "writeChainedMemoryAuditEntry").mockImplementation((...args) => {
+      calls += 1;
+      if (calls >= 2) {
+        throw new Error("audit chain broken");
+      }
+      return real(...args);
+    });
+    const database = freshDb();
+    const source = makeSource({ canonicalId: "canon_receipt_fail" });
+    const { runConsolidationCycle: runCycle } = await import("../consolidation");
+    const result = await runCycle(database, {
+      runKey: "run-receipt-fail",
+      scope: { tenantId: "default-tenant", purpose: "recall" },
+      sources: [source],
+      actorId: "operator",
+      now: new Date("2026-07-01T00:00:00.000Z"),
+    });
+    vi.restoreAllMocks();
+    expect(result.status).toBe("incomplete");
+    expect(result.failureReason).toMatch(/receipt_failure:audit chain broken/);
+  });
+
   it("vault replay mismatch records durability failure and leaves no summary", async () => {
     vi.resetModules();
     const vaultWriter = await import("@/lib/vault/writer");
