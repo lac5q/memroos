@@ -256,6 +256,23 @@ describe("GET /api/apo", () => {
     }
   });
 
+  it("sorts pending proposals by timestamp descending within the same status", async () => {
+    const older = "APO_PROPOSAL_ops_ops_20260505_110000.md";
+    const newer = "APO_PROPOSAL_ops_ops_20260505_130000.md";
+    writeFileSync(path.join(proposalsPath, older), proposalBody.replace("2026-05-05T12:00:00", "2026-05-05T11:00:00"));
+    writeFileSync(
+      path.join(proposalsPath, newer),
+      proposalBody.replace("2026-05-05T12:00:00", "2026-05-05T13:00:00"),
+    );
+
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const pendingIds = body.proposals
+      .filter((p: { status: string; id: string }) => p.status === "pending" && p.id.startsWith("APO_PROPOSAL_ops_"))
+      .map((p: { id: string }) => p.id);
+    expect(pendingIds).toEqual([older, newer]);
+  });
+
   it("sorts proposals pending before approved before archived", async () => {
     const approvedName = "APO_PROPOSAL_ops_ops_20260505_130000.md";
     const archivedName = "APO_PROPOSAL_archive_archive_20260505_140000.md";

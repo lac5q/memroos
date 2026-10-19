@@ -468,6 +468,16 @@ describe("ontology registry route", () => {
     expect(await registerContext.json()).toEqual({ ok: true });
   });
 
+  it("rejects malformed publish payloads", async () => {
+    await ensureCanonical();
+    const badPublish = await ontologyRoute.POST(operatorRequest("/api/ontology", {
+      method: "POST",
+      body: JSON.stringify({ action: "publish", actor: "operator" }),
+    }));
+    expect(badPublish.status).toBe(400);
+    expect(await badPublish.json()).toMatchObject({ ok: false, code: "invalid" });
+  });
+
   it("rejects caller-authoritative migration execution record subsets", async () => {
     const response = await ontologyRoute.POST(operatorRequest("/api/ontology", {
       method: "POST",

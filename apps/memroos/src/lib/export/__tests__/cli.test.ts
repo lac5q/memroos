@@ -100,6 +100,31 @@ describe("export cli", () => {
     expect(closeDb).toHaveBeenCalled();
   });
 
+  it("rejects export without --flat or --dsar and unknown commands", async () => {
+    const exportOnly = await runMemroosCli(["node", "memroos", "export"]);
+    expect(exportOnly).toBe(2);
+    expect(errSpy).toHaveBeenCalledWith("error: export requires --flat or --dsar");
+
+    const unknown = await runMemroosCli(["node", "memroos", "sync"]);
+    expect(unknown).toBe(2);
+    expect(errSpy).toHaveBeenCalledWith("error: unknown command: sync");
+  });
+
+  it("returns exit code 1 when the db layer throws", async () => {
+    vi.mocked(getDb).mockImplementation(() => {
+      throw new Error("db unavailable");
+    });
+    const code = await runMemroosCli([
+      "node",
+      "memroos",
+      "delete",
+      "--user",
+      "user-3",
+    ]);
+    expect(code).toBe(1);
+    expect(errSpy).toHaveBeenCalledWith("error: db unavailable");
+  });
+
   it("runs delete --user", async () => {
     const code = await runMemroosCli([
       "node",

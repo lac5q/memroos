@@ -406,6 +406,54 @@ describe("wiki-digest", () => {
     expect(bad.reason).toBeTruthy();
   });
 
+  it("parses mem0 response wrappers and uses episodic fallback when mem0 is down", async () => {
+    const kb = makeVault();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [{ id: "mem0-1", data: "Wrapped mem0 body", created_at: "2026-07-18T11:10:00.000Z" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const mem0Summary = await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: true,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      log: () => undefined,
+    });
+    expect(mem0Summary.considered).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/memory/all?agent_id="),
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+
+    const db = new Database(":memory:");
+    initSchema(db);
+    db.prepare(
+      "INSERT INTO messages(session_id, project, agent_id, role, content, timestamp) VALUES (?,?,?,?,?,?)",
+    ).run("sess", "alpha", "luis", "user", "Episodic fallback note", "2026-07-18T11:20:00.000Z");
+
+    const fallbackSummary = await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: true,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      db,
+      log: () => undefined,
+    });
+    expect(fallbackSummary.considered).toBeGreaterThanOrEqual(1);
+    db.close();
+    vi.unstubAllGlobals();
+  });
+
   it("appends to existing wiki index and log files on subsequent digests", async () => {
     const kb = makeVault();
     const wikiRoot = path.join(kb, "llm-wiki", "wiki");
