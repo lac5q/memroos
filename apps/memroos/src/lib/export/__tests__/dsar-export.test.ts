@@ -61,6 +61,25 @@ function seedKnowledgeWrite(
 }
 
 describe("dsar-export (ENTOPS-08)", () => {
+  it("ignores malformed audit metadata when listing vault paths", () => {
+    db.prepare(
+      `INSERT INTO audit_entries (id, tenant_id, actor_id, actor_role, event_type, entity_type, entity_id, reason, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "bad-meta",
+      "default-tenant",
+      "operator",
+      "operator",
+      "knowledge_access",
+      "knowledge",
+      "k1",
+      null,
+      "{not-json",
+      new Date().toISOString()
+    );
+    expect(listVaultPathsForUser(db, "default-tenant", "operator")).toEqual([]);
+  });
+
   it("lists vault paths authored by the user from knowledge audit", () => {
     seedKnowledgeWrite(db, {
       tenantId: "default-tenant",
@@ -74,6 +93,26 @@ describe("dsar-export (ENTOPS-08)", () => {
     });
     const paths = listVaultPathsForUser(db, "default-tenant", "user-a");
     expect(paths).toEqual(["shared/notes.md"]);
+  });
+
+  it("skips vault paths that escape the tenant root", () => {
+    seedKnowledgeWrite(db, {
+      tenantId: "default-tenant",
+      userId: "user-escape",
+      path: "../outside.md",
+    });
+    const vaultRoot = path.join(tmpRoot, "knowledge-escape");
+    fs.mkdirSync(path.join(vaultRoot, "tenants", "default-tenant"), { recursive: true });
+    const result = exportDsarPackage({
+      tenantId: "default-tenant",
+      userId: "user-escape",
+      outDir: path.join(tmpRoot, "out-traversal"),
+      vaultRoot,
+      db,
+      now: new Date("2026-07-16T21:00:00.000Z"),
+    });
+    expect(result.fileCount).toBe(0);
+    expect(result.vaultPaths).toEqual([]);
   });
 
   it("exportDsarPackage archives vault files + audit NDJSON", () => {

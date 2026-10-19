@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs";
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -241,6 +241,34 @@ describe("GET /api/apo", () => {
     const body = await (await GET()).json();
     expect(body.stats.lastRun).toEqual(expect.any(String));
   });
+
+  it("ignores unreadable proposal files when listing", async () => {
+    const unreadable = path.join(proposalsPath, "APO_PROPOSAL_unreadable_unreadable_20260505_150001.md");
+    writeFileSync(unreadable, proposalBody);
+    chmodSync(unreadable, 0o000);
+    try {
+      const { GET } = await loadRoute();
+      const body = await (await GET()).json();
+      expect(body.stats.totalProposals).toBe(1);
+      expect(body.proposals.every((p: { id: string }) => p.id === proposalFilename)).toBe(true);
+    } finally {
+      chmodSync(unreadable, 0o644);
+    }
+  });
+
+  it("sorts proposals pending before approved before archived", async () => {
+    const approvedName = "APO_PROPOSAL_ops_ops_20260505_130000.md";
+    const archivedName = "APO_PROPOSAL_archive_archive_20260505_140000.md";
+    mkdirSync(path.join(proposalsPath, "approved"), { recursive: true });
+    mkdirSync(path.join(proposalsPath, "archived"), { recursive: true });
+    writeFileSync(path.join(proposalsPath, "approved", approvedName), proposalBody);
+    writeFileSync(path.join(proposalsPath, "archived", archivedName), proposalBody);
+
+    const { GET } = await loadRoute();
+    const body = await (await GET()).json();
+    const statuses = body.proposals.map((p: { status: string }) => p.status);
+    expect(statuses).toEqual(["pending", "approved", "archived"]);
+  });
 });
 
 describe("POST /api/apo validation and errors", () => {
@@ -362,6 +390,23 @@ describe("POST /api/apo validation and errors", () => {
     expect(body.stats.archivedProposals).toBe(1);
   });
 
+  it("archived tracking tolerates corrupt approval sidecar JSON", async () => {
+    const { GET, POST } = await loadRoute();
+    await POST(makeApproveRequest({ action: "approve", proposalId: proposalFilename }));
+    const approvedPath = path.join(proposalsPath, "approved", proposalFilename);
+    const archivedDir = path.join(proposalsPath, "archived");
+    mkdirSync(archivedDir, { recursive: true });
+    writeFileSync(path.join(archivedDir, proposalFilename), readFileSync(approvedPath, "utf-8"));
+    writeFileSync(path.join(archivedDir, `${proposalFilename}.json`), "{not-json");
+    rmSync(`${approvedPath}.json`, { force: true });
+    rmSync(approvedPath, { force: true });
+
+    const archived = (await (await GET()).json()).proposals.find(
+      (p: { status: string }) => p.status === "archived",
+    );
+    expect(archived?.tracking?.phase).toBe("implemented");
+  });
+
   it("archived tracking falls back when approval sidecar JSON is missing", async () => {
     const { GET, POST } = await loadRoute();
     await POST(makeApproveRequest({ action: "approve", proposalId: proposalFilename }));
@@ -375,6 +420,18 @@ describe("POST /api/apo validation and errors", () => {
     const body = await (await GET()).json();
     const archived = body.proposals.find((p: { status: string }) => p.status === "archived");
     expect(archived?.tracking?.label).toBe("Implemented");
+  });
+
+  it("returns 404 when apply-approved cannot find a queued proposal", async () => {
+    const { POST } = await loadRoute();
+    const response = await POST(
+      makeApproveRequest({
+        action: "apply-approved",
+        proposalId: proposalFilename,
+      }),
+    );
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe("Approved proposal not found");
   });
 
   it("process-approved honors limit and archived tracking labels applied=false", async () => {

@@ -342,6 +342,13 @@ describe("VAL-ORCH-006 -- readViaMsiqAdapter and closeMsiqSession", () => {
     if (result.kind === "denied") expect(result.reason).toBe("session_not_found");
   });
 
+  it("closeMsiqSession returns unknown session id when token is missing", async () => {
+    const { closeMsiqSession } = await loadAdapter();
+    const closed = closeMsiqSession(db, "msst-not-found");
+    expect(closed.sessionId).toBe("msiq-unknown");
+    expect(closed.closedAt).toMatch(/^\d{4}-/);
+  });
+
   it("closeMsiqSession marks active sessions closed", async () => {
     const { openMsiqSession, closeMsiqSession } = await loadAdapter();
     const session = openMsiqSession(db, {
@@ -433,6 +440,68 @@ describe("VAL-ORCH-006 -- readViaMsiqAdapter and closeMsiqSession", () => {
     expect(result.kind).toBe("denied");
     if (result.kind === "denied") {
       expect(result.reason).toBe("session_not_found");
+    }
+  });
+
+  it("expires active sessions lazily on read and denies subsequent writes", async () => {
+    const { openMsiqSession, readViaMsiqAdapter, writeViaMsiqAdapter } = await loadAdapter();
+    const session = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: makeActor(),
+      spaceId: "space-1",
+      label: makeLabel(),
+      purpose: "memory_search",
+      beliefStage: "silver_candidate_claim",
+    });
+    if (session.kind !== "opened") throw new Error("session failed");
+    const past = new Date(Date.now() - 60_000).toISOString();
+    db.prepare(
+      `UPDATE msiq_adapter_sessions SET expires_at = ?, label_json = ? WHERE session_token = ?`
+    ).run(past, "{not-label-json", session.sessionToken);
+
+    const read = readViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      query: "hello",
+      limit: 1,
+    });
+    expect(read.kind).toBe("denied");
+    if (read.kind === "denied") {
+      expect(read.reason).toMatch(/session_(expired|closed)/);
+    }
+
+    const write = writeViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      idempotencyKey: "after-expiry",
+      payload: { content: "late write" },
+    });
+    expect(write.kind).toBe("denied");
+  });
+
+  it("denies writes when the session label fails memory policy at write time", async () => {
+    const { openMsiqSession, writeViaMsiqAdapter } = await loadAdapter();
+    const sealedLabel = {
+      visibility: "internal" as const,
+      policy: "sealed" as const,
+      domain: null,
+      sensitivity: null,
+    };
+    const session = openMsiqSession(db, {
+      tenantId: "default-tenant",
+      actor: makeActor(),
+      spaceId: "space-1",
+      label: sealedLabel,
+      purpose: "memory-promotion",
+      beliefStage: "silver_candidate_claim",
+    });
+    if (session.kind !== "opened") throw new Error("session failed");
+    const write = writeViaMsiqAdapter(db, {
+      sessionToken: session.sessionToken,
+      idempotencyKey: "policy-deny",
+      payload: { content: "blocked write" },
+    });
+    expect(write.kind).toBe("denied");
+    if (write.kind === "denied") {
+      expect(write.reason).toBe("policy_denied");
     }
   });
 

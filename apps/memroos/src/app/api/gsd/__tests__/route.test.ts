@@ -165,6 +165,26 @@ describe("GSD command routes", () => {
     expect(standupPayload.recentProof[0]).toMatchObject({ goalId: "goal-phase-133", status: "verified" });
   });
 
+  it("returns 400 when goal creation throws validation errors", async () => {
+    const { goal, registerAgent } = await loadRoutes();
+    const agent = registerAgent({
+      id: "agent-alpha",
+      name: "Agent Alpha",
+      role: "Worker",
+      platform: "codex",
+      protocol: "rest",
+      issueApiKey: true,
+    });
+    const res = await goal.POST(
+      request("http://localhost/api/gsd/goal", agent.apiKey, {
+        method: "POST",
+        body: "{",
+      }) as any
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ ok: false });
+  });
+
   it("logs explicit shipcheck bypass reasons", async () => {
     const { goal, shipcheck, registerAgent } = await loadRoutes();
     const agent = registerAgent({

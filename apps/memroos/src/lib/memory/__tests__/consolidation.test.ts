@@ -264,6 +264,19 @@ describe("VAL-MEM-025: consolidation failure and replay are safe", () => {
     expect(result.status).toBe("skipped_empty");
   });
 
+  it("policy_blocked when scope purpose is whitespace-only", async () => {
+    const database = freshDb();
+    const source = makeSource({ canonicalId: "canon_ws_purpose" });
+    const result = await runConsolidationCycle(database, {
+      runKey: "run-ws-purpose",
+      scope: { tenantId: "default-tenant", purpose: "   " },
+      sources: [source],
+      actorId: "operator",
+    });
+    expect(result.status).toBe("policy_blocked");
+    expect(result.failureReason).toBe("missing_scope_purpose");
+  });
+
   it("vault replay mismatch records durability failure and leaves no summary", async () => {
     vi.resetModules();
     const vaultWriter = await import("@/lib/vault/writer");
