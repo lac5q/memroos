@@ -79,6 +79,16 @@ describe("security policy guards", () => {
     });
   });
 
+  it("falls back to agent.host when metadata endpointUrl is invalid", () => {
+    process.env.MEMROOS_A2A_PROFILE = "cloud-https";
+    const agent = remoteAgent([
+      { id: "task:accept", name: "Accept Tasks", description: "", tags: [] },
+    ]);
+    agent.metadata = { a2a: { endpointUrl: "not-a-valid-url" } };
+    agent.host = "203.0.113.10";
+    expect(checkDispatchPolicy("memroos", agent)).toEqual({ allowed: true });
+  });
+
   it("allows dispatch when target declares a dispatch-compatible capability", () => {
     expect(checkDispatchPolicy("memroos", remoteAgent([
       { id: "task:accept", name: "Accept Tasks", description: "", tags: [] },
@@ -92,6 +102,13 @@ describe("security policy guards", () => {
       allowed: false,
       code: "MISSING_CAPABILITY",
     });
+  });
+
+  it("allows legacy undeclared capabilities when explicit override env is set", () => {
+    process.env.MEMROOS_A2A_PROFILE = "cloud-https";
+    process.env.MEMROOS_ALLOW_LEGACY_UNDECLARED_CAPABILITIES = "1";
+    expect(checkDispatchPolicy("memroos", remoteAgent())).toEqual({ allowed: true });
+    expect(checkA2aSendPolicy(registeredAgent())).toEqual({ allowed: true });
   });
 
   it("allows tier-specific memory writes only for matching tiers", () => {
