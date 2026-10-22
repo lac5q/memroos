@@ -386,13 +386,16 @@ describe("long-tail batch15 — lib modules", () => {
       const db = freshDb();
       seedSealProposal(db, "prop-a");
       seedSealProposal(db, "prop-b");
-      const j1 = createEvalJob(db, { proposalId: "prop-a", proposalType: "skill_addition", agentId: "agent-1" });
+      createEvalJob(db, { proposalId: "prop-a", proposalType: "skill_addition", agentId: "agent-1" });
       const j2 = createEvalJob(db, { proposalId: "prop-a", proposalType: "skill_addition", agentId: "agent-2" });
       createEvalJob(db, { proposalId: "prop-b", proposalType: "skill_addition", agentId: "agent-1" });
       db.prepare(`UPDATE seal_eval_jobs SET status = 'passed' WHERE id = ?`).run(j2.id);
 
       expect(listEvalJobs(db, { proposalId: "prop-a", status: "passed" })).toHaveLength(1);
-      expect(listEvalJobs(db, { limit: 2 }).map((j) => j.id)).toContain(j1.id);
+      // Same-ms created_at makes DESC order non-deterministic; only assert LIMIT size.
+      const limited = listEvalJobs(db, { limit: 2 });
+      expect(limited).toHaveLength(2);
+      expect(listEvalJobs(db).length).toBeGreaterThan(limited.length);
       db.close();
     });
   });
