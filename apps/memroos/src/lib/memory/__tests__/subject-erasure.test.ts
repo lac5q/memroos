@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { initSchema } from "@/lib/db-schema";
 import { createLegalHold } from "../retention-expiry";
 import { createRetentionPolicy, registerRetentionRecord } from "../retention-policy";
-import { approveSubjectErasurePlan, createSubjectErasurePlan, executeSubjectErasurePlan } from "../subject-erasure";
+import {
+  approveSubjectErasurePlan,
+  createSubjectErasurePlan,
+  executeSubjectErasurePlan,
+  listSubjectErasurePlans,
+} from "../subject-erasure";
 
 let db: Database.Database | null = null;
 
@@ -59,6 +64,51 @@ afterEach(() => {
 });
 
 describe("subject erasure planning and execution", () => {
+  it("matches retention records via externalId subject aliases", () => {
+    const database = freshDb();
+    const messageId = database
+      .prepare(
+        `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+         VALUES(?,?,?,?,?,?,?,?)`
+      )
+      .run(
+        "sess-ext",
+        "alpha",
+        "agent",
+        "user",
+        "external subject payload",
+        "2026-01-01T00:00:00.000Z",
+        "internal",
+        "indexable"
+      ).lastInsertRowid as number;
+    registerRetentionRecord(database, {
+      recordType: "message",
+      recordId: String(messageId),
+      ontologyType: "memory.contact_event",
+      securityLabel: { visibility: "internal" },
+      purpose: "recall",
+      scope: {
+        tenantId: "default-tenant",
+        purpose: "recall",
+        project: "alpha",
+        externalId: "crm-contact-42",
+      },
+      contentHash: `hash-ext-${messageId}`,
+      actorId: "operator",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      now: new Date("2026-01-01T00:00:00.000Z"),
+    });
+    const result = createSubjectErasurePlan(database, {
+      subject: { externalId: "crm-contact-42" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+      now: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.plan?.matchedRecords).toHaveLength(1);
+    expect(result.plan?.matchedRecords[0]?.recordId).toBe(String(messageId));
+  });
+
   it("VAL-MEM-019: resolves subject records and derivative coverage without raw payload", () => {
     const database = freshDb();
     const messageId = seedMessage(database, "SECRET_PAYLOAD_FOR_ALICE", "subject-alpha");
@@ -222,5 +272,102 @@ describe("subject erasure planning and execution", () => {
 
     expect(database.prepare(`SELECT status FROM ontology_derivative_validity WHERE derivative_type = 'versioned_record'`).get())
       .toMatchObject({ status: "revoked" });
+  });
+
+  it("denies planning when no retention records match the subject selector", () => {
+    const database = freshDb();
+    seedMessage(database, "orphan payload", "subject-missing");
+    const result = createSubjectErasurePlan(database, {
+      subject: { subjectId: "nonexistent-subject" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+      now: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe("denied");
+    expect(result.reason).toBe("subject_not_found");
+    expect(result.plan).toBeNull();
+  });
+
+  it("rejects planning when subject identity fields are empty", () => {
+    const database = freshDb();
+    const result = createSubjectErasurePlan(database, {
+      subject: { name: "   " },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("missing_subject_identity");
+  });
+
+  it("approveSubjectErasurePlan rejects plan hash mismatches", () => {
+    const database = freshDb();
+    seedMessage(database, "hash gate", "subject-hash");
+    const plan = createSubjectErasurePlan(database, {
+      id: "plan-hash-gate",
+      subject: { subjectId: "subject-hash" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+      now: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    expect(plan.ok).toBe(true);
+    expect(() =>
+      approveSubjectErasurePlan(database, {
+        planId: "plan-hash-gate",
+        planHash: "0".repeat(64),
+        actorId: "reviewer",
+      })
+    ).toThrow(/plan hash mismatch/);
+  });
+
+  it("executeSubjectErasurePlan returns blocked when every matched record is on legal hold", async () => {
+    const database = freshDb();
+    const heldOnly = seedMessage(database, "HELD_ONLY_SECRET", "subject-all-held");
+    createLegalHold(database, {
+      id: "hold-all",
+      scope: { tenantId: "default-tenant", recordId: String(heldOnly) },
+      reasonCode: "litigation",
+      actorId: "legal",
+      now: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const plan = createSubjectErasurePlan(database, {
+      id: "plan-all-held",
+      subject: { subjectId: "subject-all-held" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+      now: new Date("2026-01-03T00:00:00.000Z"),
+    });
+    approveSubjectErasurePlan(database, {
+      planId: "plan-all-held",
+      planHash: plan.plan!.planHash,
+      actorId: "reviewer",
+    });
+    const execution = await executeSubjectErasurePlan(database, {
+      planId: "plan-all-held",
+      planHash: plan.plan!.planHash,
+      actorId: "operator",
+      now: new Date("2026-01-03T00:10:00.000Z"),
+    });
+    expect(execution.status).toBe("blocked");
+    expect(execution.erased).toBe(0);
+    expect(execution.blocked).toBe(1);
+    expect(database.prepare("SELECT content FROM messages WHERE id = ?").get(heldOnly)).toMatchObject({
+      content: "HELD_ONLY_SECRET",
+    });
+  });
+
+  it("listSubjectErasurePlans returns persisted plans with parsed result_json", async () => {
+    const database = freshDb();
+    seedMessage(database, "list plans", "subject-list");
+    createSubjectErasurePlan(database, {
+      id: "plan-list",
+      subject: { subjectId: "subject-list" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      actorId: "operator",
+      now: new Date("2026-01-02T00:00:00.000Z"),
+    });
+    const rows = listSubjectErasurePlans(database, { tenantId: "default-tenant", limit: 5 });
+    expect(rows.some((row) => row.id === "plan-list")).toBe(true);
+    expect(rows.find((row) => row.id === "plan-list")?.result).toBeNull();
   });
 });
