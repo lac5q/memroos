@@ -29,6 +29,40 @@ describe("model routing APIs", () => {
     testDb.exec("DELETE FROM efficiency_events");
   });
 
+  it("GET telemetry tolerates corrupt stored context_tags JSON", async () => {
+    const { ensureModelRoutingSchema } = await import("@/lib/model-routing");
+    ensureModelRoutingSchema(testDb);
+    testDb.prepare(
+      `INSERT INTO model_routing_events
+        (task_type, agent_id, provider, model, strategy, latency_ms, input_tokens, output_tokens,
+         estimated_cost_usd, success, quality_score, context_tags, prompt_hash, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "engineering",
+      null,
+      "openai",
+      "gpt-5.4-mini",
+      "balanced",
+      null,
+      0,
+      0,
+      null,
+      1,
+      null,
+      "{bad-tags",
+      null,
+      null,
+      new Date().toISOString()
+    );
+
+    const res = await telemetryRoute.GET(
+      new Request("http://localhost/api/model-routing/telemetry?limit=5") as any
+    );
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data.events[0].contextTags).toEqual([]);
+  });
+
   it("GET telemetry returns recent events and summary", async () => {
     await telemetryRoute.POST(
       postRequest("http://localhost/api/model-routing/telemetry", {

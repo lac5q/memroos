@@ -317,6 +317,13 @@ describe("verifyKnowledgeAuditChain", () => {
     expect(result.firstBrokenEntryId).toBe(second.id);
   });
 
+  it("verifies an empty tenant chain as valid with zero rows checked", () => {
+    const db = createDb();
+    const result = verifyKnowledgeAuditChain(db, "empty-tenant");
+    expect(result.valid).toBe(true);
+    expect(result.checked).toBe(0);
+  });
+
   it("ignores other tenants' rows", () => {
     const db = createDb();
     const a = buildKnowledgeAuditEntry(db, buildArgs({ tenantId: "tenant-a", path: "a.md" }));

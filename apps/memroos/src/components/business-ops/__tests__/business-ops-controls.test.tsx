@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import BusinessOpsPage from "@/app/business-ops/page";
@@ -106,6 +106,53 @@ describe("Business Ops controls", () => {
 
     expect(document.querySelector("[data-kpi-timeline-runs-status]")).toHaveTextContent("runs: live (1)");
     expect(document.querySelector("[data-kpi-timeline-reason]")).toHaveTextContent("1 eval runs");
+  });
+
+  it("KpiTimelinePanel shows loading and empty envelopes", () => {
+    apiMock.useEvalHistory.mockReturnValue({ data: undefined, isLoading: true, error: null });
+    render(<KpiTimelinePanel />);
+    expect(document.querySelector("[data-kpi-timeline-loading]")).toHaveTextContent("Loading timeline");
+
+    apiMock.useEvalHistory.mockReturnValue({
+      data: { runs: [], timestamp: "2026-05-21T00:00:00.000Z" },
+      isLoading: false,
+      error: null,
+    });
+    render(<KpiTimelinePanel dateRange={{ since: "2026-06-01T00:00:00.000Z" }} agentId="missing-agent" />);
+    expect(document.querySelector("[data-kpi-timeline-empty]")).toBeTruthy();
+    expect(screen.getByText(/missing-agent/i)).toBeInTheDocument();
+  });
+
+  it("KpiTimelinePanel toggles visible chart layers", () => {
+    apiMock.useEvalHistory.mockReturnValue({
+      data: {
+        runs: [{
+          id: "run-toggle",
+          traceId: "trace-toggle",
+          agentId: "agent-1",
+          role: "default",
+          compositeW: 0.8,
+          trusted: true,
+          completedAt: "2026-05-21T00:00:00.000Z",
+          layers: {
+            l1: { score: 0.9, scorers: [] },
+            l2: { score: 0.85, scorers: [] },
+            l3: { score: 0.7, scorers: [] },
+          },
+          scorerResults: [],
+          judge: {},
+          driftGuard: { status: "passed" },
+        }],
+        timestamp: "2026-05-21T00:00:00.000Z",
+      },
+      isLoading: false,
+      error: null,
+    });
+    render(<KpiTimelinePanel dateRange={{ since: "2026-05-01T00:00:00.000Z" }} />);
+    const l1Toggle = document.querySelector('[data-kpi-layer-toggle="l1"]') as HTMLInputElement;
+    expect(l1Toggle.checked).toBe(true);
+    fireEvent.click(l1Toggle);
+    expect(l1Toggle.checked).toBe(false);
   });
 
   it("KpiTimelinePanel renders L3 as N/A (unavailable) when scorers are marked unavailable", () => {

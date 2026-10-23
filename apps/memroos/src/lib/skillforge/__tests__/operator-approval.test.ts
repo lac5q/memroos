@@ -188,6 +188,49 @@ describe("SkillForge Operator Approval", () => {
     expect(queue.rejected.map((proposal) => proposal.id)).toContain("rejected-1");
   });
 
+  it("returns errors for missing proposals and unknown actions", () => {
+    const missing = applyApprovalAction(db, { proposalId: "missing", action: "approve", operator: "test" });
+    expect(missing.success).toBe(false);
+    expect(missing.error).toMatch(/not found/i);
+
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("p-unknown", "skill-1", "1.0.0", "diff", "pending", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    const unknown = applyApprovalAction(db, {
+      proposalId: "p-unknown",
+      action: "launch" as "approve",
+      operator: "test",
+    });
+    expect(unknown.success).toBe(false);
+    expect(unknown.error).toMatch(/Unknown action/i);
+  });
+
+  it("approves gated proposals and rejects rollback on pending rows", () => {
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("gated-1", "skill-1", "1.0.0", "diff", "gated", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    const approved = applyApprovalAction(db, { proposalId: "gated-1", action: "approve", operator: "test" });
+    expect(approved.success).toBe(true);
+    expect(getProposal(db, "gated-1")?.status).toBe("approved");
+
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("pending-rollback", "skill-1", "1.0.0", "diff", "pending", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    const rollbackPending = applyApprovalAction(db, {
+      proposalId: "pending-rollback",
+      action: "rollback",
+      operator: "test",
+    });
+    expect(rollbackPending.success).toBe(false);
+    expect(rollbackPending.error).toMatch(/Cannot rollback/i);
+  });
+
   it("rolls back an applied proposal without export history as status-only honesty", () => {
     db.prepare(
       `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
@@ -199,5 +242,46 @@ describe("SkillForge Operator Approval", () => {
     expect(result.restored).toBe(false);
     expect(result.proposalState).toBe("pending_approval");
     expect(getProposal(db, "rollback-1")?.status).toBe("pending_approval");
+  });
+
+  it("restores registry content from export history when rolling back", () => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS skill_registry (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        source_harness TEXT NOT NULL DEFAULT 'claude',
+        version TEXT,
+        content_hash TEXT,
+        raw_body TEXT NOT NULL DEFAULT '',
+        dispatch_status TEXT NOT NULL DEFAULT 'enabled',
+        completeness_pct INTEGER NOT NULL DEFAULT 100,
+        imported_by TEXT NOT NULL DEFAULT 'operator',
+        imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    db.prepare(
+      `INSERT INTO skill_registry (id, name, source_harness, version, content_hash, raw_body)
+       VALUES (?, ?, 'claude', ?, ?, ?)`
+    ).run(42, "rollback-skill", "2.0.0", "b".repeat(64), "post-export body");
+
+    db.prepare(
+      `INSERT INTO skillforge_proposals (id, source_skill_id, source_version, proposed_diff, status, rejected_edits, residual_risks, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run("rollback-restore", "42", "1.0.0", "diff", "exported", "[]", "[]", new Date().toISOString(), new Date().toISOString());
+
+    db.prepare(
+      `INSERT INTO skillforge_exports (proposal_id, pre_version, pre_hash, pre_raw_body, created_at)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run("rollback-restore", "1.0.0", "a".repeat(64), "pre-export body", new Date().toISOString());
+
+    const result = rollbackProposal(db, "rollback-restore", "operator", "restore boundary");
+    expect(result.success).toBe(true);
+    expect(result.restored).toBe(true);
+    expect(result.postVersion).toBe("1.0.0");
+    const row = db
+      .prepare(`SELECT version, raw_body FROM skill_registry WHERE id = ?`)
+      .get(42) as { version: string; raw_body: string };
+    expect(row.version).toBe("1.0.0");
+    expect(row.raw_body).toBe("pre-export body");
   });
 });
