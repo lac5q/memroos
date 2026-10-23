@@ -110,6 +110,16 @@ describe("space-cache.ts (Phase 140 / CACHEADMIN-01..05)", () => {
     expect(state.entries[0].retrievalCount).toBe(3);
   });
 
+  it("2b) getCacheState returns empty summary when spaceId is blank", () => {
+    expect(getCacheState(db, "  ")).toEqual({
+      totalResources: 0,
+      totalCachedSize: 0,
+      totalRetrievals: 0,
+      entries: [],
+    });
+    expect(getInvalidationHistory(db, "")).toEqual([]);
+  });
+
   it("3) getCacheState returns empty summary for unknown space", () => {
     const state = getCacheState(db, "spc_unknown");
     expect(state.totalResources).toBe(0);
@@ -225,6 +235,25 @@ describe("space-cache.ts (Phase 140 / CACHEADMIN-01..05)", () => {
     expect(history[0].resourceId).toBeNull();
     expect(history[0].reason).toBe("refresh");
     expect(history[0].actorId).toBe(actorId);
+  });
+
+  it("12b) getInvalidationHistory preserves explicit null metadata fields", () => {
+    db.prepare(
+      `INSERT INTO audit_entries (id, tenant_id, actor_id, actor_role, event_type, entity_type, entity_id, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "audit-null-meta",
+      "default-tenant",
+      actorId,
+      "operator",
+      "cache.invalidated",
+      "space_cache",
+      `cache:${spaceId}:all`,
+      JSON.stringify({ resourceId: null, reason: null }),
+      new Date().toISOString()
+    );
+    const history = getInvalidationHistory(db, spaceId);
+    expect(history[0]).toMatchObject({ resourceId: null, reason: null, actorId });
   });
 
   it("13) recordCacheFetch and invalidateResource validate inputs", () => {
