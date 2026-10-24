@@ -177,7 +177,8 @@ describe("batch15 — API route branches", () => {
     const res = await POST(
       makePost(`${LOOPBACK}/api/skills/verify`, { skill_name: `missing-${randomUUID()}` }),
     );
-    expect([200, 400]).toContain(res.status);
+    // 400: no operator key; 404: key present but skill missing; 200: fail-closed verified=false.
+    expect([200, 400, 404]).toContain(res.status);
     const body = await res.json();
     expect(body.verified === false || body.ok === false).toBe(true);
   });
