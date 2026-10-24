@@ -143,6 +143,34 @@ describe("marketplace", () => {
     expect(byDownloads.listings[0].downloadCount).toBeGreaterThanOrEqual(2);
   });
 
+  it("checkDispatchEligibility rejects retired lifecycle and tampered hashes", () => {
+    const retired = checkDispatchEligibility({
+      id: 1,
+      name: "retired-skill",
+      source_harness: "claude",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      lifecycle_state: "retired",
+      raw_body: "body",
+      content_hash: "abc",
+    } as never);
+    expect(retired.eligible).toBe(false);
+    expect(retired.reason).toMatch(/retired/i);
+
+    const tampered = checkDispatchEligibility({
+      id: 2,
+      name: "tampered-skill",
+      source_harness: "claude",
+      dispatch_status: "enabled",
+      completeness_pct: 100,
+      lifecycle_state: "enabled",
+      raw_body: "actual body",
+      content_hash: "f".repeat(64),
+    } as never);
+    expect(tampered.eligible).toBe(false);
+    expect(tampered.reason).toMatch(/tamper detected/i);
+  });
+
   it("checkDispatchEligibility reports missing registry rows and disabled dispatch", () => {
     const enabledRow = db.prepare(
       `SELECT id, name, source_harness, dispatch_status, completeness_pct, lifecycle_state, content_hash, raw_body, signature, version

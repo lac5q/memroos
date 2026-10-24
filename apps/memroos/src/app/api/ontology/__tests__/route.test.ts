@@ -416,6 +416,68 @@ describe("ontology registry route", () => {
     expect(await persisted.json()).toMatchObject({ candidate: { status: "invalidated" } });
   });
 
+  it("rejects ontology writes from remote hosts without operator credentials", async () => {
+    const response = await ontologyRoute.POST(
+      new Request("https://memroos.example/api/ontology", {
+        method: "POST",
+        body: JSON.stringify({ action: "ensure_canonical", actor: "operator" }),
+      }),
+    );
+    expect(response.status).toBe(403);
+  });
+
+  it("rejects unknown POST actions and invalid revoke reasons", async () => {
+    await ensureCanonical();
+    const unknown = await ontologyRoute.POST(operatorRequest("/api/ontology", {
+      method: "POST",
+      body: JSON.stringify({ action: "not_a_real_action", actor: "operator" }),
+    }));
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ ok: false, code: "invalid" });
+
+    const badReason = await ontologyRoute.POST(operatorRequest("/api/ontology", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "revoke_source",
+        tenantId: "t",
+        spaceId: "s",
+        sourceId: "src",
+        sourceHash: SOURCE_HASH,
+        actor: "operator",
+        reason: "forged",
+      }),
+    }));
+    expect(badReason.status).toBe(400);
+  });
+
+  it("registers policy context through the authenticated route", async () => {
+    await ensureCanonical();
+    const registerContext = await ontologyRoute.POST(operatorRequest("/api/ontology", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "register_policy_context",
+        tenantId: "route-tenant",
+        spaceId: "route-space",
+        contextHash: SOURCE_HASH,
+        policyVersion: "1.0.0",
+        actor: "operator",
+        expiresAt: "2027-01-01T00:00:00.000Z",
+      }),
+    }));
+    expect(registerContext.status).toBe(200);
+    expect(await registerContext.json()).toEqual({ ok: true });
+  });
+
+  it("rejects malformed publish payloads", async () => {
+    await ensureCanonical();
+    const badPublish = await ontologyRoute.POST(operatorRequest("/api/ontology", {
+      method: "POST",
+      body: JSON.stringify({ action: "publish", actor: "operator" }),
+    }));
+    expect(badPublish.status).toBe(400);
+    expect(await badPublish.json()).toMatchObject({ ok: false, code: "invalid" });
+  });
+
   it("rejects caller-authoritative migration execution record subsets", async () => {
     const response = await ontologyRoute.POST(operatorRequest("/api/ontology", {
       method: "POST",

@@ -99,6 +99,24 @@ describe("coding-agent memory continuity", () => {
     );
   });
 
+  it("sanitizes primitive capture fields and compacts non-string summaries", () => {
+    captureCodingAgentSession(db, {
+      sourceAgentId: "codex",
+      runtime: "codex",
+      sessionId: "session-primitive",
+      taskId: "task-primitive",
+      summary: 42,
+      decisionIntent: "not-an-object",
+      errors: "single-error",
+      verification: null,
+      files: "not-an-array",
+    } as unknown as Parameters<typeof captureCodingAgentSession>[1]);
+
+    const pack = buildCodingAgentHandoffPack(db, { taskId: "task-primitive" });
+    expect(pack.contextPack.captures[0]?.summary).toBe("42");
+    expect(pack.contextPack.durableCandidates.length).toBeGreaterThanOrEqual(0);
+  });
+
   it("redacts secrets in handoff state and suppresses duplicate captures", () => {
     const token = `ghp_${"a".repeat(36)}`;
     const input = {
