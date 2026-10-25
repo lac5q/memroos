@@ -132,6 +132,17 @@ describe("DispatchPanel interactions", () => {
     });
   });
 
+  it("surfaces network failures from fetch rejections", async () => {
+    vi.mocked(fetch).mockRejectedValueOnce(new Error("network down"));
+    wrap(<DispatchPanel />);
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "sophia" } });
+    fireEvent.change(screen.getByPlaceholderText("Task summary…"), { target: { value: "offline" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Dispatch$/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/network down/)).toBeInTheDocument();
+    });
+  });
+
   it("surfaces API errors from dispatch failures", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: false,

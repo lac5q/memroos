@@ -123,6 +123,27 @@ describe("BELIEF-05 promotion eval CI canary", () => {
     fs.unlinkSync(customPath);
   });
 
+  it("runBeliefPromotionEvalSuite captures handler exceptions as failed cases", async () => {
+    db = new Database(":memory:");
+    initSchema(db);
+    db.exec("DROP TABLE agent_memory_candidates");
+
+    const run = await runBeliefPromotionEvalSuite({ mode: "gold", db });
+    expect(run.pass).toBe(false);
+    expect(run.cases.some((c) => c.pass === false && c.reason && c.reason.length > 0)).toBe(true);
+  });
+
+  it("runBeliefPromotionEvalSuite returns pass false with zero cases when cases file is empty", async () => {
+    db = new Database(":memory:");
+    initSchema(db);
+    const casesPath = path.join(os.tmpdir(), `belief-empty-cases-${Date.now()}.json`);
+    fs.writeFileSync(casesPath, JSON.stringify([]), "utf8");
+    const run = await runBeliefPromotionEvalSuite({ mode: "full", db, casesPath });
+    expect(run.summary.totalCases).toBe(0);
+    expect(run.pass).toBe(true);
+    fs.unlinkSync(casesPath);
+  });
+
   it("runBeliefPromotionEvalSuite honors a custom clock for startedAt", async () => {
     db = new Database(":memory:");
     initSchema(db);

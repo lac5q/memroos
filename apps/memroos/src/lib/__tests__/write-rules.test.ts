@@ -382,6 +382,25 @@ describe("write-rules.ts (Phase 138 / WRITERULES-01..06)", () => {
     ).toThrow(/version conflict/);
   });
 
+  it("22b) updateDocumentDirectoryEntry rejects empty names and duplicate names in a space", () => {
+    const first = createDocumentDirectoryEntry(db, { spaceId, name: "alpha.md", actorId });
+    createDocumentDirectoryEntry(db, { spaceId, name: "beta.md", actorId });
+    expect(() =>
+      updateDocumentDirectoryEntry(db, first.id, {
+        name: "   ",
+        actorId,
+        expectedVersion: 1,
+      }),
+    ).toThrow(/name cannot be empty/);
+    expect(() =>
+      updateDocumentDirectoryEntry(db, first.id, {
+        name: "beta.md",
+        actorId,
+        expectedVersion: 1,
+      }),
+    ).toThrow(/already exists/);
+  });
+
   // --- deleteDocumentDirectoryEntry (WRITERULES-05) ---
 
   it("23) deleteDocumentDirectoryEntry removes the entry and writes audit", () => {
@@ -441,6 +460,13 @@ describe("write-rules.ts (Phase 138 / WRITERULES-01..06)", () => {
     expect(result.isStale).toBe(true);
     expect(result.currentVersion).toBe(2);
     expect(result.driftReceiptReason).toBe("agent view is stale");
+  });
+
+  it("27b) checkWriteRuleDrift treats blank spaceId as current with version 0", () => {
+    const result = checkWriteRuleDrift(db, "  ", 99);
+    expect(result.isStale).toBe(false);
+    expect(result.currentVersion).toBe(0);
+    expect(result.driftReceiptReason).toBe("current");
   });
 
   it("27) checkWriteRuleDrift returns currentVersion=0 and isStale=false for space with no rules", () => {
