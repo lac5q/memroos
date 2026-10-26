@@ -288,6 +288,55 @@ describe("AgentRegistryPage", () => {
     });
   });
 
+  it("stores one-time API keys after registration succeeds", async () => {
+    render(<AgentRegistryPage />);
+
+    fireEvent.click(screen.getByText("Advanced"));
+    fireEvent.change(screen.getByLabelText("Agent name"), { target: { value: "Keyed Agent" } });
+    fireEvent.change(screen.getByLabelText("Agent role"), { target: { value: "Stores key" } });
+    fireEvent.click(screen.getByText("Register"));
+    const [, registerOptions] = mutateRegister.mock.calls.at(-1)!;
+    registerOptions.onSuccess({ apiKey: "one-time-key-123" });
+    await waitFor(() => {
+      expect(screen.getByText("one-time-key-123")).toBeInTheDocument();
+    });
+  });
+
+  it("handles invite responses without commands and clipboard failures", async () => {
+    render(<AgentRegistryPage />);
+    fireEvent.click(screen.getByText("Copy Invite"));
+    const [, inviteOptions] = mutateInvite.mock.calls.at(-1)!;
+    await inviteOptions.onSuccess({});
+    await waitFor(() => {
+      expect(screen.getByText(/Invite response did not include a command/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Copy Invite"));
+    const [, secondInviteOptions] = mutateInvite.mock.calls.at(-1)!;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: vi.fn(() => false) });
+    await secondInviteOptions.onSuccess({ command: "curl http://localhost/invite" });
+    await waitFor(() => {
+      expect(screen.getByText(/Copy it from the box below/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await waitFor(() => {
+      expect(screen.getByText(/Clipboard unavailable/i)).toBeInTheDocument();
+    });
+  });
+
+  it("filters agents by status selection", () => {
+    render(<AgentRegistryPage />);
+    fireEvent.click(document.querySelector('[data-filter-value="idle"]')!);
+    expect(screen.getByText(/No registered agents match this view/i)).toBeInTheDocument();
+    fireEvent.click(document.querySelector('[data-filter-value="active"]')!);
+    expect(screen.getByText("REST Agent")).toBeInTheDocument();
+  });
+
   it("renders liveness and readiness banners when envelopes are present", () => {
     mockUseRegisteredAgents.mockReturnValue({
       data: {

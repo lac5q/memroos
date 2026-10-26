@@ -1,8 +1,9 @@
 /**
  * End-to-end runner tests (VAL-RETR-001, VAL-RETR-005, VAL-RETR-008, VAL-RETR-013).
  */
+//@vitest-environment node
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   runBenchmark,
   writeReport,
@@ -12,6 +13,9 @@ import {
 import { canonicalOutputPath } from "../redaction";
 import { hashScopeIdentity, normalizeScopeIdentity } from "@/lib/msiq/scope-identity";
 import { resolveFromRepoRoot } from "@/lib/paths";
+import { createWriteGuard } from "../modules/cli-parser";
+import { getAdapter } from "../adapters";
+import type { StageRecord } from "../modules/reconciliation";
 
 const FIXTURES_DIR = resolveFromRepoRoot("evals", "comparative-retrieval", "fixtures");
 
@@ -396,5 +400,172 @@ describe("loadDataset explicit errors", () => {
       fixturesDir: path.join(FIXTURES_DIR, "missing-dir"),
     });
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("runBenchmark extended seams", () => {
+  it("records stale live pipeline candidates in stage records", async () => {
+    const normalized = normalizeScopeIdentity(LIVE_SCOPE);
+    if (!normalized) throw new Error("expected complete live test scope");
+    const scopeHashValue = hashScopeIdentity(normalized);
+    const rerankMod = await import("../modules/rerank");
+    const staleItem = {
+      id: "stale-rerank",
+      score: 99,
+      text: "stale candidate",
+      tier: "live" as const,
+      source: "live",
+      authorizationResult: "stale" as const,
+      whyEntered: "test",
+      scopeHash: scopeHashValue,
+      rankPosition: 1,
+    };
+    vi.spyOn(rerankMod, "rerankCandidates").mockResolvedValueOnce({
+      items: [staleItem],
+      receipt: { strategy: "provider", cutoff: 3, inputCount: 1, outputCount: 1 },
+    });
+    const r = await runBenchmark({
+      dataset: "memroos_public_synthetic",
+      adapter: "live",
+      limit: 1,
+      k: 3,
+      seed: 0,
+      bypassCliParser: true,
+      fixturesDir: FIXTURES_DIR,
+      scope: LIVE_SCOPE,
+    });
+    vi.restoreAllMocks();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const task = r.report.tasks[0];
+    expect(
+      r.pipeline?.perTaskStageRecords.get(task.taskId)?.some(
+        (record) => record.stage === "stale" && record.ids.includes("stale-rerank")
+      )
+    ).toBe(true);
+  });
+
+  it("normalizes invalid adapter payloads to provider_failed results", async () => {
+    const entry = getAdapter("lexical");
+    if (!entry) throw new Error("lexical adapter missing");
+    vi.spyOn(entry.adapter, "run").mockResolvedValueOnce({
+      taskId: "broken",
+      adapterName: "lexical",
+      retrieved: "not-an-array",
+      injected: [],
+      ignored: [],
+      latencyMs: 1,
+      status: "ok",
+      receipt: { metrics: {}, authorization: { evaluated: false } },
+    } as never);
+    const r = await runBenchmark({
+      dataset: "memroos_public_synthetic",
+      adapter: "lexical",
+      limit: 1,
+      k: 3,
+      seed: 0,
+      bypassCliParser: true,
+      fixturesDir: FIXTURES_DIR,
+    });
+    vi.restoreAllMocks();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.report.tasks[0]?.status).toBe("provider_failed");
+  });
+
+  it("writes markdown reports through renderTextReport", async () => {
+    const r = await runBenchmark({
+      dataset: "memroos_public_synthetic",
+      adapter: "lexical",
+      limit: 2,
+      k: 3,
+      seed: 0,
+      bypassCliParser: true,
+      fixturesDir: FIXTURES_DIR,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const tmpDir = `/tmp/bench-md-out-${Date.now()}`;
+    const w = writeReport({ report: r.report, outputDir: tmpDir, extension: "md" });
+    const fs = await import("node:fs");
+    expect(fs.existsSync(w.path)).toBe(true);
+    expect(fs.readFileSync(w.path, "utf8")).toContain("Aggregate Scores");
+  });
+
+  it("forwards per-task stage records through onStageRecords", async () => {
+    const stageRecords = new Map<string, StageRecord[]>();
+    const r = await runBenchmark({
+      dataset: "memroos_public_synthetic",
+      adapter: "lexical",
+      limit: 2,
+      k: 3,
+      seed: 0,
+      bypassCliParser: true,
+      fixturesDir: FIXTURES_DIR,
+      onStageRecords: (records) => {
+        for (const [taskId, rows] of records.entries()) {
+          stageRecords.set(taskId, rows);
+        }
+      },
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(stageRecords.size).toBeGreaterThan(0);
+    const firstTaskStages = stageRecords.values().next().value as StageRecord[];
+    expect(firstTaskStages.some((row) => row.stage === "injected")).toBe(true);
+  });
+
+  it("classifies thrown adapter errors as unavailable task results", async () => {
+    const entry = getAdapter("lexical");
+    if (!entry) throw new Error("lexical adapter missing");
+    vi.spyOn(entry.adapter, "run").mockRejectedValueOnce(new Error("ETIMEDOUT calling provider"));
+
+    const r = await runBenchmark({
+      dataset: "memroos_public_synthetic",
+      adapter: "lexical",
+      limit: 1,
+      k: 3,
+      seed: 0,
+      bypassCliParser: true,
+      fixturesDir: FIXTURES_DIR,
+    });
+    vi.restoreAllMocks();
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.report.tasks[0]?.status).toBe("provider_timeout");
+  });
+
+  it("honors armed write guards when writing markdown reports", async () => {
+    const r = await runBenchmark({
+      dataset: "memroos_public_synthetic",
+      adapter: "lexical",
+      limit: 3,
+      k: 3,
+      seed: 0,
+      rerankEnabled: true,
+      judgeEnabled: true,
+      bypassCliParser: true,
+      fixturesDir: FIXTURES_DIR,
+      withAudit: false,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const guard = createWriteGuard(true);
+    const ensureWritable = vi.spyOn(guard, "ensureWritable");
+    const tmpDir = `/tmp/bench-md-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    expect(() =>
+      writeReport({
+        report: r.report,
+        outputDir: tmpDir,
+        extension: "md",
+        writeGuard: guard,
+      }),
+    ).toThrow(/no_write_blocked/);
+    expect(ensureWritable).toHaveBeenCalledWith(expect.objectContaining({ reason: "report_write" }));
+
+    const text = renderTextReport(r.report);
+    expect(text).toContain("Per-Lane Aggregates");
+    expect(text).toContain("precision@k");
   });
 });

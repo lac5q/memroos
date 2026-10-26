@@ -99,4 +99,64 @@ describe("SdkBackedEvalService", () => {
     };
     expect(traceBody.metadata?.sealModeledRescore).toBe(true);
   });
+
+  it("getRunById returns null on the SDK path", () => {
+    const service = new SdkBackedEvalService({
+      baseUrl: "http://localhost:3000",
+      apiKey: "explicit-key",
+    });
+    expect(service.getRunById()).toBeNull();
+  });
+
+  it("createEvalServiceForSeal returns null outside production", async () => {
+    const { createEvalServiceForSeal } = await import("../sdk-eval-service");
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    try {
+      expect(createEvalServiceForSeal({ apiKey: "explicit-key" })).toBeNull();
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+  });
+
+  it("createEvalServiceForSeal constructs a service in production when keyed", async () => {
+    const { createEvalServiceForSeal } = await import("../sdk-eval-service");
+    const prevNode = process.env.NODE_ENV;
+    const prevKey = process.env.MEMROOS_INTERNAL_API_KEY;
+    process.env.NODE_ENV = "production";
+    process.env.MEMROOS_INTERNAL_API_KEY = "production-only-test-key-not-default";
+    try {
+      const service = createEvalServiceForSeal();
+      expect(service).toBeInstanceOf(SdkBackedEvalService);
+    } finally {
+      process.env.NODE_ENV = prevNode;
+      if (prevKey === undefined) delete process.env.MEMROOS_INTERNAL_API_KEY;
+      else process.env.MEMROOS_INTERNAL_API_KEY = prevKey;
+    }
+  });
+
+  it("runForTrace submits a trace and loads the resulting run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const href = String(url);
+        if (href.endsWith("/api/public/v1/traces") && init?.method === "POST") {
+          return Response.json({ runId: "run-from-trace" });
+        }
+        if (href.endsWith("/api/public/v1/runs/run-from-trace")) {
+          return Response.json({ run: { ...baselineRun(), id: "run-from-trace", traceId: "trace-abc" } });
+        }
+        return Response.json({ error: "unexpected" }, { status: 500 });
+      })
+    );
+
+    const service = new SdkBackedEvalService({
+      baseUrl: "http://localhost:3000",
+      apiKey: "explicit-key",
+    });
+    const run = await service.runForTrace("trace-abc", "agent-1");
+    expect(run.id).toBe("run-from-trace");
+    expect(run.traceId).toBe("trace-abc");
+  });
+
 });
