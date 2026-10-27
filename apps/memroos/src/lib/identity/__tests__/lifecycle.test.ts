@@ -303,6 +303,10 @@ describe("identity/lifecycle.ts (Phase 131 / TEAMSCALE-02..04)", () => {
       expect(orphans[0].hasLiveKey).toBe(true);
     });
 
+    it("returns member default role for unknown users", () => {
+      expect(getUserRoleOrDefault(db, "missing-user-id")).toBe("member");
+    });
+
     it("flags a deregistered agent with a live key as orphaned", () => {
       const space = createSpace(db, { tenantId: "default-tenant", name: "zombie" });
       const receipt = onboardUser(db, {

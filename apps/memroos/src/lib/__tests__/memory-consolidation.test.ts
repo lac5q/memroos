@@ -138,6 +138,19 @@ describe('runConsolidation', () => {
     expect(body.model).toBe('qwen-local:test');
   });
 
+  it('records failed status when Ollama returns a non-OK HTTP response', async () => {
+    mockFetch.mockResolvedValueOnce(new Response('model unavailable', { status: 503 }));
+    seedMessage('ollama-fail');
+    const { runConsolidation } = await import('@/lib/memory-consolidation');
+    const result = await runConsolidation();
+    expect(result.status).toBe('failed');
+    const run = testDb
+      .prepare('SELECT status, error_message FROM memory_consolidation_runs ORDER BY id DESC LIMIT 1')
+      .get() as { status: string; error_message: string | null } | undefined;
+    expect(run?.status).toBe('failed');
+    expect(String(run?.error_message ?? '')).toMatch(/Ollama API error/i);
+  });
+
   it('skips provider calls during rate-limit backoff', async () => {
     seedMessage('rl1');
     testDb.prepare(

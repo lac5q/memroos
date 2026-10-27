@@ -367,6 +367,26 @@ describe("retrieval-bench fixture validation (VAL-RETR-002)", () => {
     expect(validScope.ok).toBe(true);
   });
 
+  it("rejects malformed sessions arrays and accepts valid temporal metadata enums", () => {
+    const badSessions = validateTask(makeTask({ sessions: "not-an-array" }), { seenIds: new Set() });
+    expect(badSessions.ok).toBe(false);
+    if (!badSessions.ok) {
+      expect(badSessions.issues.some((i) => i.reason === "sessions_not_array")).toBe(true);
+    }
+
+    const validTemporal = validateTask(
+      makeTask({
+        temporal_metadata: {
+          reference_time_iso: "2026-01-01T00:00:00Z",
+          fact_valid_until_iso: "2026-12-31T23:59:59Z",
+          temporal_direction: "between",
+        },
+      }),
+      { seenIds: new Set() },
+    );
+    expect(validTemporal.ok).toBe(true);
+  });
+
   it("validateFixtures rejects non-arrays and partitionValidTasks returns valid tasks", () => {
     const notArray = validateFixtures({ id: "task-1" });
     expect(notArray.ok).toBe(false);

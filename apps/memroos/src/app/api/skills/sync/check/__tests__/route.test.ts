@@ -74,6 +74,34 @@ function makePost(url: string, body: unknown, headers: Record<string, string> = 
 }
 
 describe("POST /api/skills/sync/check", () => {
+  it("400 on invalid JSON body", async () => {
+    process.env["MEMROOS_OPERATOR_API_KEY"] = "right-key";
+    await loadDb();
+    const route = await loadRoute();
+    const res = await route.POST(
+      new Request("https://example.com/api/skills/sync/check", {
+        method: "POST",
+        headers: { authorization: "Bearer right-key", "content-type": "application/json" },
+        body: "{",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Invalid JSON/i);
+  });
+
+  it("400 when body is not an object", async () => {
+    process.env["MEMROOS_OPERATOR_API_KEY"] = "right-key";
+    await loadDb();
+    const route = await loadRoute();
+    const res = await route.POST(
+      makePost("https://example.com/api/skills/sync/check", "not-an-object", {
+        authorization: "Bearer right-key",
+      })
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/Body must be an object/i);
+  });
+
   it("401 without operator key on non-loopback host", async () => {
     delete process.env["MEMROOS_OPERATOR_API_KEY"];
     await loadDb();

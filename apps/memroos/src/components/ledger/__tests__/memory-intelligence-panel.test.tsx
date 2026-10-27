@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -79,6 +79,42 @@ describe("MemoryIntelligencePanel", () => {
     expect(screen.getByText("91.7%")).toBeTruthy();
     expect(screen.getByText("11/12 passing")).toBeTruthy();
     expect(screen.getAllByText("vector").length).toBeGreaterThan(1);
+  });
+
+  it("triggers consolidation and surfaces failed run details", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+    } as Response);
+    mockUseMemoryStats.mockReturnValue({
+      data: {
+        lastRun: {
+          status: "failed",
+          started_at: "2026-07-20T14:00:00.000Z",
+          completed_at: "2026-07-20T14:05:00.000Z",
+          insights_written: 0,
+          batch_size: 12,
+          error_message: "model   timeout   from provider",
+        },
+        pendingUnconsolidated: 4,
+        tierStats: [],
+        consolidationModel: "claude-test",
+        sources: [],
+        recentFailures24h: 3,
+        timestamp: "2026-05-05T00:00:00.000Z",
+      },
+      isLoading: false,
+    } as ReturnType<typeof useMemoryStats>);
+
+    render(<MemoryIntelligencePanel />, { wrapper });
+
+    expect(screen.getByText(/Latest error: model timeout from provider/)).toBeTruthy();
+    expect(screen.getByText(/3 failures recorded in the last 24h/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Now" }));
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith("/api/memory-consolidate", { method: "POST" });
+    });
+    fetchMock.mockRestore();
   });
 
   it("surfaces degraded memory tier details", () => {
