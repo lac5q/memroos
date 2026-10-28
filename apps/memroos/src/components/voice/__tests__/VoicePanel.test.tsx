@@ -359,6 +359,196 @@ describe("VoicePanel", () => {
     expect(screen.getByRole("option", { name: "Codex CLI - Agent" })).toBeInTheDocument();
   });
 
+  it("labels dedicated Gemini and Cursor CLI identities", () => {
+    mockUseAgents.mockReturnValue({
+      data: {
+        agents: [
+          {
+            id: "gemini-senior-engineer",
+            name: "Gemini Engineer",
+            role: "Gemini CLI identity",
+            company: null,
+            platform: "gemini",
+            protocol: "local",
+            metadata: { source: "registry" },
+          },
+          {
+            id: "cursor-ide-agent",
+            name: "Cursor Agent",
+            role: "Cursor IDE identity",
+            company: null,
+            platform: "cursor",
+            protocol: "local",
+            metadata: { source: "registry" },
+          },
+        ],
+      },
+    } as ReturnType<typeof useAgents>);
+    render(<VoicePanel />);
+    expect(screen.getByRole("option", { name: "Gemini CLI - Senior Engineer" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Cursor IDE - Agent" })).toBeInTheDocument();
+  });
+
+  it("labels qwen-engineer and project metadata overrides", () => {
+    mockUseAgents.mockReturnValue({
+      data: {
+        agents: [
+          {
+            id: "qwen-engineer",
+            name: "Qwen Worker",
+            role: "Engineer",
+            company: "Epilogue",
+            platform: "qwen",
+            protocol: "local",
+            metadata: { source: "registry" },
+          },
+          {
+            id: "pmo-workspace-agent",
+            name: "Workspace Agent",
+            role: "PMO helper",
+            company: null,
+            platform: "codex",
+            protocol: "local",
+            metadata: { source: "pmo-agents", workspace: "Custom Workspace" },
+          },
+          {
+            id: "knowledge-agent",
+            name: "Knowledge Agent",
+            role: "Librarian",
+            company: null,
+            platform: "codex",
+            protocol: "local",
+            metadata: { source: "pmo-agents", path: "/data/knowledge/docs" },
+          },
+          {
+            id: "fallback-company",
+            name: "Company Agent",
+            role: "Ops",
+            company: "Acme Corp",
+            platform: "unknown_platform",
+            protocol: "local",
+            metadata: { source: "registry" },
+          },
+        ],
+      },
+    } as ReturnType<typeof useAgents>);
+
+    render(<VoicePanel />);
+    expect(screen.getByRole("option", { name: "Qwen CLI - Engineer" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "PC (Custom Workspace) - Workspace Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "PC (Knowledge) - Knowledge Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "MemroOS system - Company Agent" })).toBeInTheDocument();
+  });
+
+  it("ignores duplicate sends while a chat request is in flight", async () => {
+    let resolveFetch: (value: Response) => void = () => {};
+    const pending = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(pending));
+
+    render(<VoicePanel />);
+    const textarea = screen.getByPlaceholderText(/Message .* \(Enter to send\)/);
+    fireEvent.change(textarea, { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    fireEvent.change(textarea, { target: { value: "second" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+
+    resolveFetch(
+      new Response('data: {"text":"done"}\n\ndata: [DONE]\n\n', {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("done")).toBeInTheDocument();
+    });
+  });
+
+  it("stops speaking from the voice tab after TTS playback starts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"text":"Voice line"}\n\ndata: [DONE]\n\n'),
+              );
+              controller.close();
+            },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          blob: async () => new Blob(["audio"], { type: "audio/mpeg" }),
+        }),
+    );
+
+    const pause = vi.fn();
+    vi.stubGlobal(
+      "Audio",
+      class {
+        onended: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        pause = pause;
+        play = vi.fn().mockResolvedValue(undefined);
+      },
+    );
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:voice-stop"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    class MockRecognition {
+      continuous = false;
+      interimResults = true;
+      lang = "en-US";
+      onresult: ((event: SpeechRecognitionEvent) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        const result = {
+          isFinal: true,
+          0: { transcript: "voice line" },
+        } as unknown as SpeechRecognitionResult;
+        this.onresult?.({ results: [result] } as SpeechRecognitionEvent);
+      }
+      stop() {}
+    }
+    vi.stubGlobal("SpeechRecognition", MockRecognition);
+
+    render(<VoicePanel />);
+    fireEvent.click(screen.getByRole("button", { name: "voice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start listening" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Stop speaking" })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop speaking" }));
+    expect(pause).toHaveBeenCalled();
+  });
+
+  it("alerts when speech recognition is unavailable on the voice tab", () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    // @ts-expect-error cleanup
+    delete window.SpeechRecognition;
+    // @ts-expect-error cleanup
+    delete window.webkitSpeechRecognition;
+
+    render(<VoicePanel />);
+    fireEvent.click(screen.getByRole("button", { name: "voice" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start listening" }));
+
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining("Speech recognition not supported"));
+    alertSpy.mockRestore();
+  });
+
   it("surfaces generic chat errors from non-streaming failures", async () => {
     vi.stubGlobal(
       "fetch",

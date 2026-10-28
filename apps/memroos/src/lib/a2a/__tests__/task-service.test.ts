@@ -62,6 +62,30 @@ describe("A2A task service", () => {
     expect(row?.task.metadata).not.toMatchObject({ callerAgentId: "spoofed-caller" });
   });
 
+  it("extracts text from data and file message parts", async () => {
+    const { registerAgent, sendA2aMessage } = await loadService();
+    const { agent } = registerAgent({ id: "parts-agent", name: "Parts", role: "Parts", platform: "codex", protocol: "a2a" });
+    const task = await sendA2aMessage(agent, {
+      message: {
+        messageId: crypto.randomUUID(),
+        role: "user",
+        parts: [
+          { kind: "data", data: { note: "payload" } },
+          { kind: "file", file: { name: "brief.txt", uri: "file://brief.txt" } },
+        ],
+      },
+    });
+    expect(task.status.state).toBe("submitted");
+  });
+
+  it("returns NOT_FOUND when an unrelated agent requests a task", async () => {
+    const { getA2aTaskForAgent, registerAgent, sendA2aMessage } = await loadService();
+    const { agent: caller } = registerAgent({ id: "caller-a", name: "Caller", role: "Caller", platform: "codex", protocol: "a2a" });
+    const { agent: other } = registerAgent({ id: "other-agent", name: "Other", role: "Other", platform: "codex", protocol: "a2a" });
+    const task = await sendA2aMessage(caller, { message: message("private") });
+    await expect(getA2aTaskForAgent(other, task.id)).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
   it("creates a task and appends task.created", async () => {
     const { getA2aTask, registerAgent, sendA2aMessage } = await loadService();
     const { agent } = registerAgent({ id: "creator", name: "Creator", role: "Creator", platform: "codex", protocol: "a2a" });

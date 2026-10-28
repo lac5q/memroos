@@ -529,3 +529,21 @@ describe("VAL-SKILL-037 export binds hashes and prevents runtime when not approv
     expect(loadIntakeRow(db, "redact-ok")?.scopeKey).toBe("tenant/default");
   });
 });
+
+describe("intakeProposal validation", () => {
+  it("rejects missing proposalId, sourceSkillId, sourceVersion, diff, and actor", async () => {
+    const { intakeProposal, SkillForgeIntakeError } = await import("../intake-export");
+    const base = {
+      proposalId: "p1",
+      sourceSkillId: "skill-1",
+      sourceVersion: "1.0.0",
+      proposedDiff: "## Preconditions\nnone",
+      actor: "operator",
+    };
+    expect(() => intakeProposal(db, { ...base, proposalId: "  " })).toThrow(SkillForgeIntakeError);
+    expect(() => intakeProposal(db, { ...base, sourceSkillId: "" })).toThrow(/sourceSkillId/);
+    expect(() => intakeProposal(db, { ...base, sourceVersion: " " })).toThrow(/sourceVersion/);
+    expect(() => intakeProposal(db, { ...base, proposedDiff: "" })).toThrow(/proposedDiff/);
+    expect(() => intakeProposal(db, { ...base, actor: "" })).toThrow(/actor/);
+  });
+});

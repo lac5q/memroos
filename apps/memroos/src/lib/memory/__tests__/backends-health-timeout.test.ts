@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { checkVectorHealth, checkGraphHealth, mem0HealthTimeoutMs, neo4jConfig, queryGraphMemory } from "../backends";
+import {
+  checkVectorHealth,
+  checkGraphHealth,
+  mem0HealthTimeoutMs,
+  neo4jConfig,
+  neo4jHttpQuery,
+  neo4jUsesQueryApi,
+  queryGraphMemory,
+  searchVectorMemory,
+} from "../backends";
 import * as registry from "../registry";
 
 const ORIGINAL_ENV = { ...process.env };
@@ -166,12 +175,12 @@ describe("checkVectorHealth timeout honesty", () => {
     process.env.NEO4J_HTTP_URL = "http://neo4j.example.com/";
     process.env.NEO4J_DATABASE = "graphdb";
     process.env.NEO4J_USERNAME = "graph-user";
-    process.env.NEO4J_PASSWORD = "graph-pass";
+    process.env.NEO4J_PASSWORD = "test-graph-pass";
     expect(neo4jConfig()).toEqual({
       url: "http://neo4j.example.com",
       database: "graphdb",
       username: "graph-user",
-      password: "graph-pass",
+      password: "test-graph-pass",
     });
     for (const [key, value] of Object.entries(original)) {
       if (value === undefined) delete process.env[key as keyof typeof original];
@@ -179,9 +188,83 @@ describe("checkVectorHealth timeout honesty", () => {
     }
   });
 
+  it("neo4jHttpQuery throws when password is missing", async () => {
+    const prev = process.env.NEO4J_PASSWORD;
+    process.env.NEO4J_PASSWORD = "";
+    let message = "";
+    try {
+      await neo4jHttpQuery("RETURN 1");
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("Neo4j password is not configured");
+    if (prev !== undefined) process.env.NEO4J_PASSWORD = prev;
+    else delete process.env.NEO4J_PASSWORD;
+  });
+
+  it("neo4jHttpQuery uses Query API v2 for Aura hosts", async () => {
+    expect(neo4jUsesQueryApi("https://abcd.databases.neo4j.io")).toBe(true);
+    process.env.NEO4J_HTTP_URL = "https://abcd.databases.neo4j.io";
+    process.env.NEO4J_PASSWORD = "test-aura-pass";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain("/query/v2");
+        return Response.json({ data: { fields: ["count"], values: [[42]] } });
+      }),
+    );
+    const body = await neo4jHttpQuery("MATCH (n) RETURN count(n) AS count");
+    expect(body.results[0]?.data[0]?.row[0]).toBe(42);
+  });
+
+  it("searchVectorMemory surfaces mem0 HTTP errors on the direct path", async () => {
+    vi.spyOn(registry, "getAdapters").mockImplementation(() => []);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ detail: "search offline" }, { status: 503 })),
+    );
+    let message = "";
+    try {
+      await searchVectorMemory("hello", 3);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain("search offline");
+  });
+
+  it("searchVectorMemory uses recent query fallback when search text is empty", async () => {
+    vi.spyOn(registry, "getAdapters").mockImplementation(() => []);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(String(url)).toContain("q=recent");
+        return Response.json({ results: [] });
+      }),
+    );
+    await searchVectorMemory("", 5);
+  });
+
+  it("marks vector degraded on mem0 disk warning without home-advisory alone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          status: "ok",
+          vector_store: "connected",
+          queue: { queued: 0 },
+          memory_runtime: { status: "available" },
+          disk: { warning: true, critical: false },
+        }),
+      ),
+    );
+    const health = await checkVectorHealth();
+    expect(health.status).toBe("up");
+    expect(String(health.detail ?? "")).toMatch(/disk warning/);
+  });
+
   it("queryGraphMemory and checkGraphHealth use the direct Neo4j HTTP path when no adapter is registered", async () => {
     const getAdaptersSpy = vi.spyOn(registry, "getAdapters").mockReturnValue([]);
-    process.env.NEO4J_PASSWORD = "graph-pass";
+    process.env.NEO4J_PASSWORD = "test-graph-pass";
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string, init?: RequestInit) => {
