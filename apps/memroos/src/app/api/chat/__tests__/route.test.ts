@@ -157,6 +157,48 @@ async function loadPostRouteWithOpenCodeRssExceeded() {
   return import("../route");
 }
 
+async function loadPostRouteWithOpenCodeSpawnError(errorMessage: string) {
+  vi.resetModules();
+  vi.stubEnv("AGENT_CONFIGS_PATH", agentConfigsPath);
+  vi.stubEnv("PMO_AGENT_CONFIGS_PATH", pmoAgentsPath);
+  vi.stubEnv("PMO_MODEL_ROUTING_PATH", pmoModelRoutingPath);
+  vi.stubEnv("SQLITE_DB_PATH", testDbPath);
+  vi.stubEnv("ANTHROPIC_API_KEY", "test-key");
+  vi.stubEnv("MEMROOS_ENABLE_OPENCODE", "true");
+  vi.doMock("@anthropic-ai/sdk", () => ({
+    default: class MockAnthropic {
+      messages = {
+        stream: vi.fn(async () => {
+          throw new Error("anthropic should not run");
+        }),
+      };
+    },
+  }));
+  vi.doMock("child_process", async () => {
+    const { EventEmitter } = await import("events");
+    return {
+      execFile: vi.fn(),
+      spawn: vi.fn(() => {
+        const child = new EventEmitter() as EventEmitter & {
+          stdout: EventEmitter;
+          stderr: EventEmitter;
+          pid: number;
+          exitCode: number | null;
+        };
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.pid = 24680;
+        child.exitCode = null;
+        queueMicrotask(() => {
+          child.emit("error", new Error(errorMessage));
+        });
+        return child;
+      }),
+    };
+  });
+  return import("../route");
+}
+
 async function loadPostRouteWithOpenCodeBusySlot() {
   vi.resetModules();
   vi.stubEnv("AGENT_CONFIGS_PATH", agentConfigsPath);
@@ -853,6 +895,28 @@ describe("chat route model resolution", () => {
 
     expect(res.status).toBe(200);
     expect(text).toMatch(/exceeded 1MB RSS|partial output before rss stop/);
+  });
+
+  it("surfaces OpenCode spawn errors on the SSE stream", async () => {
+    mkdirSync(path.join(pmoAgentsPath, "alba"), { recursive: true });
+    writeFileSync(path.join(pmoAgentsPath, "alba", "AGENTS.md"), "# Alba\n");
+    await registerTestAgent({
+      id: "alba",
+      name: "Alba",
+      role: "Head Chef",
+      platform: "hermes",
+    });
+    const { POST } = await loadPostRouteWithOpenCodeSpawnError("spawn EACCES");
+
+    const res = await POST(new NextRequest("http://localhost/api/chat", {
+      method: "POST",
+      body: JSON.stringify({ agentId: "alba", message: "status check", history: [] }),
+      headers: { "content-type": "application/json" },
+    }));
+    const text = await readStream(res);
+
+    expect(res.status).toBe(200);
+    expect(text).toContain("spawn EACCES");
   });
 
   it("returns a busy error when OpenCode concurrency is saturated", async () => {
