@@ -61,6 +61,25 @@ function seedKnowledgeWrite(
 }
 
 describe("dsar-export (ENTOPS-08)", () => {
+  it("ignores malformed audit metadata when listing vault paths", () => {
+    db.prepare(
+      `INSERT INTO audit_entries (id, tenant_id, actor_id, actor_role, event_type, entity_type, entity_id, reason, metadata_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "bad-meta",
+      "default-tenant",
+      "operator",
+      "operator",
+      "knowledge_access",
+      "knowledge",
+      "k1",
+      null,
+      "{not-json",
+      new Date().toISOString()
+    );
+    expect(listVaultPathsForUser(db, "default-tenant", "operator")).toEqual([]);
+  });
+
   it("lists vault paths authored by the user from knowledge audit", () => {
     seedKnowledgeWrite(db, {
       tenantId: "default-tenant",
@@ -74,6 +93,26 @@ describe("dsar-export (ENTOPS-08)", () => {
     });
     const paths = listVaultPathsForUser(db, "default-tenant", "user-a");
     expect(paths).toEqual(["shared/notes.md"]);
+  });
+
+  it("skips vault paths that escape the tenant root", () => {
+    seedKnowledgeWrite(db, {
+      tenantId: "default-tenant",
+      userId: "user-escape",
+      path: "../outside.md",
+    });
+    const vaultRoot = path.join(tmpRoot, "knowledge-escape");
+    fs.mkdirSync(path.join(vaultRoot, "tenants", "default-tenant"), { recursive: true });
+    const result = exportDsarPackage({
+      tenantId: "default-tenant",
+      userId: "user-escape",
+      outDir: path.join(tmpRoot, "out-traversal"),
+      vaultRoot,
+      db,
+      now: new Date("2026-07-16T21:00:00.000Z"),
+    });
+    expect(result.fileCount).toBe(0);
+    expect(result.vaultPaths).toEqual([]);
   });
 
   it("exportDsarPackage archives vault files + audit NDJSON", () => {
@@ -102,6 +141,72 @@ describe("dsar-export (ENTOPS-08)", () => {
     expect(result.auditEntryCount).toBeGreaterThanOrEqual(1);
     expect(result.vaultPaths).toContain("shared/notes.md");
     expect(fs.existsSync(result.manifestPath)).toBe(true);
+  });
+
+  it("lists vault paths for read and delete knowledge audit operations", () => {
+    seedKnowledgeWrite(db, {
+      tenantId: "default-tenant",
+      userId: "user-read",
+      path: "shared/read.md",
+    });
+    const readEntry = buildKnowledgeAuditEntry(db, {
+      tenantId: "default-tenant",
+      actorId: "operator-1",
+      actorRole: "operator",
+      path: "shared/deleted.md",
+      operation: "delete",
+      agentId: "agent-1",
+      userId: "user-read",
+      opHash: "sha256:abc",
+    });
+    writeAuditEntry(
+      {
+        id: readEntry.id,
+        tenant_id: readEntry.tenantId,
+        actor_id: readEntry.actorId,
+        actor_role: readEntry.actorRole,
+        event_type: readEntry.eventType,
+        entity_type: readEntry.entityType,
+        entity_id: readEntry.entityId,
+        reason: readEntry.reason,
+        metadata_json: readEntry.metadata_json,
+        created_at: readEntry.created_at,
+      },
+      db
+    );
+    expect(listVaultPathsForUser(db, "default-tenant", "user-read").sort()).toEqual([
+      "shared/deleted.md",
+      "shared/read.md",
+    ]);
+  });
+
+  it("exportDsarPackage skips non-file vault paths during copy", () => {
+    const vaultRoot = path.join(tmpRoot, "knowledge-nonfile");
+    const tenantVault = path.join(vaultRoot, "tenants", "default-tenant");
+    fs.mkdirSync(path.join(tenantVault, "shared"), { recursive: true });
+    fs.writeFileSync(path.join(tenantVault, "shared", "notes.md"), "# notes\n");
+
+    seedKnowledgeWrite(db, {
+      tenantId: "default-tenant",
+      userId: "user-dir",
+      path: "shared",
+    });
+    seedKnowledgeWrite(db, {
+      tenantId: "default-tenant",
+      userId: "user-dir",
+      path: "shared/notes.md",
+    });
+
+    const result = exportDsarPackage({
+      tenantId: "default-tenant",
+      userId: "user-dir",
+      outDir: path.join(tmpRoot, "out-nonfile"),
+      vaultRoot,
+      db,
+      now: new Date("2026-07-16T21:00:00.000Z"),
+    });
+    expect(result.fileCount).toBe(1);
+    expect(result.vaultPaths).toEqual(["shared/notes.md"]);
   });
 
   it("deleteDsarUser tombstones without removing audit rows", () => {

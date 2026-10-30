@@ -201,6 +201,41 @@ describe("POST /api/dispatch", () => {
     }));
   });
 
+  it("audits content_flagged when scanContent matches but does not block", async () => {
+    mockScanContent.mockReturnValue({
+      blocked: false,
+      matches: [{ patternName: "shell.rm_rf", severity: "MEDIUM", redacted: "rm -rf" }],
+      cleanContent: "Draft blog post",
+    });
+    const res = await POST(makeRequest({ to_agent: "sophia", task_summary: "Draft blog post" }) as any);
+    expect(res.status).toBe(200);
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      action: "content_flagged",
+      severity: "medium",
+    }));
+  });
+
+  it("409 SKILL_AMBIGUOUS — refuses dispatch when multiple harnesses match", async () => {
+    mockLookupSkillContract.mockReturnValue({
+      kind: "ambiguous",
+      skill_name: "review-pr",
+      reason: "Multiple harnesses expose review-pr",
+      candidate_harnesses: ["claude", "codex"],
+    });
+    const res = await POST(makeRequest({
+      to_agent: "sophia",
+      task_summary: "Review the pull request",
+      skill_name: "review-pr",
+    }) as any);
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body.code).toBe("SKILL_AMBIGUOUS");
+    expect(mockWriteAuditLog).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      action: "policy_denied",
+    }));
+    expect(mockSelectAdapter).not.toHaveBeenCalled();
+  });
+
   it("403 CONTENT_BLOCKED — scanContent blocks", async () => {
     mockScanContent.mockReturnValue({ blocked: true, matches: [], cleanContent: "" });
     const res = await POST(makeRequest({ to_agent: "sophia", task_summary: "rm -rf /" }) as any);
@@ -317,6 +352,65 @@ describe("POST /api/dispatch", () => {
 
     expect(res.status).toBe(200);
     expect(mockCheckDispatchPolicy).toHaveBeenCalledWith("agent:sophia", expect.anything());
+  });
+
+  it("derives pin harness from skill name when legacy pin omits skill_id", async () => {
+    const namedHarnessStmt = {
+      run: vi.fn().mockReturnValue({ lastInsertRowid: 1 }),
+      get: vi.fn((arg: unknown) => {
+        if (typeof arg === "number") return undefined;
+        if (arg === "review-pr") return { source_harness: "claude" };
+        return undefined;
+      }),
+      all: vi.fn().mockReturnValue([]),
+    };
+    mockGetDb.mockReturnValue({ prepare: vi.fn().mockReturnValue(namedHarnessStmt) } as any);
+    mockGetAgentVersionPin.mockReturnValue({
+      id: 1,
+      agent_id: "memroos",
+      skill_name: "review-pr",
+      skill_id: null,
+      current_version: "1.0.0",
+      current_content_hash: "b".repeat(64),
+      prior_version: null,
+      prior_content_hash: null,
+      prior_skill_id: null,
+      actor: "operator",
+      created_at: "2026-07-12T00:00:00Z",
+      updated_at: "2026-07-12T00:00:00Z",
+      rolled_back_at: null,
+      rolled_back_by: null,
+      last_rollback_event_id: null,
+    });
+    mockLookupSkillContract.mockReturnValue({
+      kind: "hit",
+      skill: {
+        id: 42,
+        name: "review-pr",
+        source_harness: "claude",
+        version: "2.0.0",
+        risk_tier: "low",
+        dispatch_status: "enabled",
+        completeness_pct: 100,
+        trust_level: "unsigned",
+        signature: null,
+        content_hash: "a".repeat(64),
+      },
+    });
+
+    const res = await POST(makeRequest({
+      to_agent: "sophia",
+      task_summary: "Review the pull request",
+      skill_name: "review-pr",
+    }) as any);
+    expect(res.status).toBe(403);
+    expect(mockLookupSkillContract).toHaveBeenCalledWith(
+      expect.anything(),
+      "review-pr",
+      expect.objectContaining({
+        pinned: expect.objectContaining({ source_harness: "claude" }),
+      }),
+    );
   });
 
   it("403 SKILL_GOVERNANCE_DENIED — same-hash pinned version drift denies before adapter invocation", async () => {
