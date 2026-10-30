@@ -685,6 +685,20 @@ function filterOptions(rows: MemoryInventoryRow[], categories: MemoryInventoryCa
   };
 }
 
+/** Test-only: reset module caches between Vitest cases. */
+export function _resetMemoryInventoryCacheForTest(): void {
+  knowledgeCategoryCache = null;
+  knowledgeCategoryInflight = null;
+  categoryCountsCache = null;
+}
+
+/** Test-only: invoke categoryCounts with optional knowledge wait flag. */
+export async function _categoryCountsForTest(
+  waitForKnowledge = false,
+): Promise<MemoryInventoryCategory[]> {
+  return categoryCounts(waitForKnowledge);
+}
+
 export async function buildMemoryInventory(url: URL): Promise<MemoryInventoryResponse> {
   const filters = parseFilters(url);
   // Always resolve knowledge counts so notebooks/inventory surfaces show live
