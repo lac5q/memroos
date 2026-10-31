@@ -241,6 +241,62 @@ describe("buildMemoryInventory", () => {
     expect(response.rows.some((r) => r.category === "knowledge_file")).toBe(false);
   });
 
+  it("parses Neo4j transactional count payloads for graph_fact category", async () => {
+    const prev = process.env.NEO4J_PASSWORD;
+    process.env.NEO4J_PASSWORD = "test-graph-pass";
+    vi.doMock("@/lib/memory/backends", async () => {
+      const actual = await vi.importActual<typeof import("@/lib/memory/backends")>(
+        "@/lib/memory/backends"
+      );
+      return {
+        ...actual,
+        neo4jHttpQuery: vi.fn(async () => ({
+          results: [{ data: [{ row: [17] }] }],
+          errors: [],
+        })),
+      };
+    });
+    vi.resetModules();
+    const { buildMemoryInventory } = await import("../memory-inventory");
+    const response = await buildMemoryInventory(new URL("http://localhost/api/memory-inventory"));
+    const graph = response.categories.find((c) => c.id === "graph_fact");
+    expect(graph?.count).toBe(17);
+    expect(graph?.status).toBe("live");
+    if (prev === undefined) delete process.env.NEO4J_PASSWORD;
+    else process.env.NEO4J_PASSWORD = prev;
+    vi.doUnmock("@/lib/memory/backends");
+    vi.resetModules();
+  });
+
+  it("warns when mem0 reports connected vector store without a count", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          status: "ok",
+          vector_store: "connected",
+        }),
+      })
+    );
+    const { buildMemoryInventory } = await import("../memory-inventory");
+    const response = await buildMemoryInventory(new URL("http://localhost/api/memory-inventory"));
+    const vector = response.categories.find((c) => c.id === "vector_memory");
+    expect(vector?.count).toBeNull();
+    expect(vector?.warnings.some((w) => /memory_count|points_count/i.test(w))).toBe(true);
+  });
+
+  it("filters ingested_message rows by agent source alias", async () => {
+    seedMessage("agent filter hit");
+    testDb.prepare(`UPDATE messages SET agent_id = ? WHERE content = ?`).run("research-bot", "agent filter hit");
+    const { buildMemoryInventory } = await import("../memory-inventory");
+    const response = await buildMemoryInventory(
+      new URL("http://localhost/api/memory-inventory?category=ingested_message&agent=research-bot")
+    );
+    expect(response.rows).toHaveLength(1);
+    expect(response.rows[0]?.source).toBe("research-bot");
+  });
+
   it("parses malformed agent_memory_writes metadata as empty object", async () => {
     testDb
       .prepare(

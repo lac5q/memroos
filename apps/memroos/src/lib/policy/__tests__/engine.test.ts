@@ -19,11 +19,42 @@ import { authorizeMemoryUse } from "@/lib/memory/policy-gate";
 import { checkDispatchPolicy } from "@/lib/security-policy";
 import type { RemoteAgentConfig } from "@/types";
 
+import { checkA2aSendPolicy, checkMemoryWritePolicy } from "@/lib/security-policy";
+import type { RegisteredAgent } from "@/types";
+
 import {
   POLICY_VERSION,
+  buildReceipt,
   evaluateKnowledgePolicy,
   evaluatePolicy,
 } from "../engine";
+
+function registeredAgent(capabilities: RegisteredAgent["capabilities"] = []): RegisteredAgent {
+  return {
+    id: "agent-1",
+    name: "Agent",
+    role: "Agent",
+    platform: "codex",
+    protocol: "a2a",
+    status: "active",
+    lastHeartbeat: null,
+    currentTask: null,
+    lessonsCount: 0,
+    todayMemoryCount: 0,
+    location: "local",
+    isRemote: false,
+    latencyMs: null,
+    capabilities,
+    metadata: {},
+    host: null,
+    port: null,
+    healthEndpoint: null,
+    tunnelUrl: null,
+    createdAt: "2026-05-11T00:00:00.000Z",
+    updatedAt: "2026-05-11T00:00:00.000Z",
+    deregisteredAt: null,
+  };
+}
 
 let db: Database.Database;
 
@@ -124,6 +155,26 @@ describe("policy engine — memory-use domain", () => {
   });
 });
 
+describe("buildReceipt", () => {
+  it("collapses agent roles to system at the audit boundary", () => {
+    const receipt = buildReceipt(
+      {
+        domain: "memory-use",
+        action: "receipt.shape",
+        actor: { id: "agent:test", role: "agent", tenantId: "tenant-a" },
+      },
+      {
+        outcome: "allow",
+        reason: "ok",
+        ruleMatched: "memsec.memory-use",
+      },
+    );
+    expect(receipt.actorRole).toBe("system");
+    expect(receipt.tenantId).toBe("tenant-a");
+    expect(receipt.policyVersion).toBe(POLICY_VERSION);
+  });
+});
+
 describe("policy engine — capability domain", () => {
   const remoteTargetNoDispatch: RemoteAgentConfig = {
     id: "agent:remote-no-dispatch",
@@ -150,6 +201,31 @@ describe("policy engine — capability domain", () => {
     if (savedExplicitLegacy === undefined)
       delete process.env.MEMROOS_ALLOW_LEGACY_UNDECLARED_CAPABILITIES;
     else process.env.MEMROOS_ALLOW_LEGACY_UNDECLARED_CAPABILITIES = savedExplicitLegacy;
+  });
+
+  it("evaluates a2a-send and memory-write capabilities byte-identically to security-policy", () => {
+    const agent = registeredAgent([
+      { id: "a2a:send", name: "Send", description: "", tags: [] },
+      { id: "memory:write:graph", name: "Graph writes", description: "", tags: [] },
+    ]);
+
+    const a2a = evaluatePolicy({
+      domain: "capability",
+      action: "a2a.send.test",
+      actor: { id: agent.id, role: "agent" },
+      capability: { kind: "a2a-send", agent },
+    });
+    expect(a2a.capability).toEqual(checkA2aSendPolicy(agent));
+    expect(a2a.receipt.ruleMatched).toBe("capability.a2a-send");
+
+    const write = evaluatePolicy({
+      domain: "capability",
+      action: "memory.write.test",
+      actor: { id: agent.id, role: "agent" },
+      capability: { kind: "memory-write", agent, tier: "graph" },
+    });
+    expect(write.capability).toEqual(checkMemoryWritePolicy(agent, "graph"));
+    expect(write.receipt.ruleMatched).toBe("capability.memory-write");
   });
 
   it("dispatch target with no dispatch skills returns deny and matches checkDispatchPolicy", () => {
