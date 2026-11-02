@@ -1,5 +1,22 @@
 name: memroos
-version: 1.0.0
+version: 1.1.0
 description: "MemRoOS — opt-in dual-mode memory mirror. Built-in MEMORY.md stays primary; MemRoOS observes via native-memory ingest."
+author: lac5q
+kind: exclusive
+requires_hermes: ">=0.21"
+optional_env:
+  - MEMROOS_AGENT_API_KEY
+  - MEMROOS_OPERATOR_API_KEY
+kind: exclusive
+requires_hermes: ">=0.21"
+optional_env:
+  - MEMROOS_AGENT_API_KEY
+  - MEMROOS_OPERATOR_API_KEY
+# General lifecycle hooks registered through ctx.register_hook (the provider
+# ABC methods on_session_end / on_pre_compress / on_memory_write are not hooks).
 hooks:
-  - on_memory_write
+  - on_session_start
+provides_hooks:
+  - on_session_start
+provides_tools: []
+provides_middleware: []
