@@ -91,6 +91,25 @@ describe("A2A task store", () => {
     expect(record?.events.map((event) => event.sequence)).toEqual([1, 2]);
   });
 
+  it("tolerates corrupt JSON columns when loading tasks and events", async () => {
+    const { createA2aTask, getA2aTask, appendA2aTaskEvent, getDb } = await loadStore();
+    createA2aTask({ taskId: "task-bad-json", contextId: "ctx-bad", callerAgentId: "caller", message: MESSAGE });
+    appendA2aTaskEvent("task-bad-json", "task.created", { ok: true });
+    getDb()
+      .prepare(
+        `UPDATE a2a_tasks SET message_json = ?, metadata_json = ?, artifacts_json = ? WHERE task_id = ?`
+      )
+      .run("{bad", "{bad", "{bad", "task-bad-json");
+    getDb()
+      .prepare(`UPDATE a2a_task_events SET payload_json = ? WHERE task_id = ?`)
+      .run("{bad", "task-bad-json");
+
+    const record = getA2aTask("task-bad-json");
+    expect(record?.task.metadata).toEqual({});
+    expect(record?.task.artifacts).toEqual([]);
+    expect(record?.events[0]?.payload).toEqual({});
+  });
+
   it("filters listed tasks to caller or target agent", async () => {
     const { createA2aTask, listA2aTasksForAgent } = await loadStore();
     createA2aTask({ taskId: "caller-task", contextId: "ctx-a", callerAgentId: "agent-a", targetAgentId: "agent-b", message: MESSAGE });

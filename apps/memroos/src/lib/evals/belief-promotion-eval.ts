@@ -575,6 +575,7 @@ export async function runBeliefPromotionEvalSuite(
       continue;
     }
     try {
+      freshDb(db);
       const handler = handlers[caseDef.id];
       if (!handler) {
         results.push({
