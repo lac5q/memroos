@@ -140,6 +140,28 @@ function createProposal(db: Database.Database, diff: Record<string, unknown>): {
 }
 
 describe("SEAL post-apply re-scoring", () => {
+  it("uses the high-mode memory signal for strong baselines", () => {
+    const strongBaseline = baselineRun({
+      compositeW: 0.78,
+      layers: {
+        l1: { score: 0.78, weight: 0.25, scorers: [] },
+        l2: { score: 0.78, weight: 0.5, scorers: [] },
+        l3: { score: 0.78, weight: 0.25, scorers: [] },
+      },
+    });
+    const diff = findDiff("positive");
+    const post = rescorePostApply({
+      baseline: strongBaseline,
+      proposalType: "salience_update",
+      diff,
+      forecastWDelta: 0.08,
+      config,
+      goldenSet,
+      goldenSetPath: "./golden-sets/ops-50.jsonl",
+    });
+    expect(post.compositeW).not.toBe(strongBaseline.compositeW);
+  });
+
   it("moves W deterministically for memory proposals", () => {
     const diff = findDiff("positive");
 
