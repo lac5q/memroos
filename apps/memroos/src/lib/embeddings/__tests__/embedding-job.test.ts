@@ -77,4 +77,48 @@ describe("embedding background job", () => {
     await expect(runEmbeddingCycle(db)).resolves.toEqual({ embedded: 0, degraded: true });
     expect(getEmbedding(db, id)).toBeNull();
   });
+
+  it("skips messages with empty content without calling the provider", async () => {
+    db.prepare(
+      `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      "embedding-job-empty",
+      "test-project",
+      "test-agent",
+      "user",
+      "   ",
+      new Date().toISOString(),
+      "public_approved",
+      "indexable"
+    );
+
+    const result = await runEmbeddingCycle(db);
+    expect(result).toEqual({ embedded: 0, degraded: false });
+    expect(mockEmbedText).not.toHaveBeenCalled();
+  });
+
+  it("returns degraded when the embedding cycle throws", async () => {
+    const spy = vi.spyOn(await import("../store"), "messagesNeedingEmbedding").mockImplementation(() => {
+      throw new Error("sqlite unavailable");
+    });
+    await expect(runEmbeddingCycle(db)).resolves.toEqual({ embedded: 0, degraded: true });
+    spy.mockRestore();
+  });
+
+  it("does not schedule the background job when the provider is disabled", async () => {
+    vi.resetModules();
+    vi.doMock("../provider", () => ({
+      embedText: vi.fn(),
+      embeddingProviderEnabled: vi.fn(() => false),
+    }));
+    const intervalSpy = vi.spyOn(global, "setInterval");
+    const { startEmbeddingJob } = await import("../embedding-job");
+    startEmbeddingJob();
+    startEmbeddingJob();
+    expect(intervalSpy).not.toHaveBeenCalled();
+    intervalSpy.mockRestore();
+    vi.doUnmock("../provider");
+    vi.resetModules();
+  });
 });

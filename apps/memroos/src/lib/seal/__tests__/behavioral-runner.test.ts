@@ -106,6 +106,22 @@ function makeRunnerOptions(
   };
 }
 
+describe("BehavioralRunner: guard rails", () => {
+  it("marks the job failed when the linked proposal row is missing", async () => {
+    const db = new Database(":memory:");
+    initSchema(db);
+    db.pragma("foreign_keys = OFF");
+    const job = createEvalJob(db, {
+      proposalId: "missing-proposal",
+      proposalType: "agent_instruction_patch",
+      agentId: "agent-1",
+    });
+    db.pragma("foreign_keys = ON");
+    await runQueuedJob(db, job.id, makeRunnerOptions(db, baseRun()));
+    expect(getEvalJob(db, job.id)?.status).toBe("failed");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 1. Runner success path
 // ---------------------------------------------------------------------------
