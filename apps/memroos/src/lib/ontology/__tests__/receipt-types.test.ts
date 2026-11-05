@@ -79,6 +79,11 @@ describe("ONTO-06 ontology type receipt refs", () => {
     expect(JSON.stringify(result.receipts[0])).not.toContain("Acme ARR");
   });
 
+  it("rejects empty ontologyType tokens", () => {
+    expect(() => buildOntologyTypeReceiptRef({ ontologyType: "" })).toThrow(/ontologyType/i);
+    expect(ontologyTypeFromCanonicalId("   ")).toBe("");
+  });
+
   it("withOntologyTypeRef preserves prior ontology coordinates", () => {
     const enriched = withOntologyTypeRef(
       {

@@ -29,6 +29,54 @@ beforeEach(() => {
 });
 
 describe('auth session cookies', () => {
+  it('login rejects invalid JSON and missing credentials', async () => {
+    const { POST } = await import('../login/route');
+    expect(
+      (
+        await POST(
+          new Request('http://localhost/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{',
+          }) as never
+        )
+      ).status
+    ).toBe(400);
+
+    expect(
+      (
+        await POST(
+          new Request('http://localhost/api/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: 'a@example.com' }),
+          }) as never
+        )
+      ).status
+    ).toBe(400);
+  });
+
+  it('login rejects unknown users without leaking timing differences', async () => {
+    mocks.db.prepare.mockImplementation((sql: string) => {
+      if (sql.includes('FROM users WHERE email = ?')) {
+        return { get: () => undefined };
+      }
+      return { run: vi.fn() };
+    });
+    mocks.verifyPassword.mockResolvedValueOnce(false);
+
+    const { POST } = await import('../login/route');
+    const response = await POST(
+      new Request('http://localhost/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'missing@example.com', password: 'secret' }),
+      }) as never
+    );
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: 'invalid email or password' });
+  });
+
   it('login issues longer-lived HttpOnly access and refresh cookies', async () => {
     mocks.db.prepare.mockImplementation((sql: string) => {
       if (sql.includes('FROM users WHERE email = ?')) {
@@ -63,6 +111,23 @@ describe('auth session cookies', () => {
     expect(cookies).toContain('access_token=');
     expect(cookies).toContain('HttpOnly');
     expect(cookies).toContain('Max-Age=43200');
+  });
+
+  it('refresh requires a refresh cookie and clears cookies on invalid tokens', async () => {
+    const { POST } = await import('../refresh/route');
+    expect((await POST(new Request('http://localhost/api/auth/refresh', { method: 'POST' }))).status).toBe(
+      401
+    );
+
+    mocks.db.prepare.mockImplementation(() => ({ get: () => undefined }));
+    const bad = await POST(
+      new Request('http://localhost/api/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: 'memroos_refresh=missing' },
+      })
+    );
+    expect(bad.status).toBe(401);
+    expect(bad.headers.get('set-cookie')).toContain('Max-Age=0');
   });
 
   it('refresh rotates the refresh token and also refreshes the HttpOnly access cookie', async () => {

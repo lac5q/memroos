@@ -37,6 +37,17 @@ describe("GET /api/tool-attention/similar", () => {
     expect(text).not.toContain('"task"');
   });
 
+  it("parses comma-separated tags and clamps invalid limits", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/tool-attention/similar?tags=alpha,beta&limit=not-a-number"
+    );
+    await GET(req);
+    expect(getSimilarTaskRecommendations).toHaveBeenCalledWith(
+      expect.objectContaining({ tags: ["alpha", "beta"] }),
+      10
+    );
+  });
+
   it("falls back to empty array when no outcomes exist", async () => {
     vi.mocked(getSimilarTaskRecommendations).mockReturnValueOnce({
       context: {},
