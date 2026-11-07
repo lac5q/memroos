@@ -51,6 +51,21 @@ describe("directiveDiff", () => {
     expect(diff.removed).toEqual([]);
     expect(diff.changed).toEqual([]);
   });
+
+  it("records removed lines when canonical is longer than local", () => {
+    const diff = directiveDiff("only-local\n", "canonical-a\ncanonical-b\n");
+    expect(diff.changed).toEqual([
+      { lineNumber: 1, local: "only-local", canonical: "canonical-a" },
+    ]);
+    expect(diff.removed).toEqual([{ lineNumber: 2, content: "canonical-b" }]);
+    expect(diff.added).toEqual([]);
+  });
+
+  it("treats empty bodies as zero budget lines", () => {
+    const report = computeDirectiveBudget("", { budgetLines: 200 });
+    expect(report.lineCount).toBe(0);
+    expect(report.status).toBe("ok");
+  });
 });
 
 describe("computeDirectiveBudget", () => {
@@ -96,6 +111,24 @@ describe("loadDirectiveBudgetConfig / tenant override", () => {
   it("honors MEMROOS_DIRECTIVE_BUDGET_LINES", () => {
     process.env.MEMROOS_DIRECTIVE_BUDGET_LINES = "150";
     expect(loadDirectiveBudgetConfig().budgetLines).toBe(150);
+  });
+
+  it("rejects invalid tenant budget writes", () => {
+    expect(() => setTenantDirectiveBudget("  ", 100)).toThrow(/tenantId required/);
+    expect(() => setTenantDirectiveBudget("acme", 0)).toThrow(/positive number/);
+  });
+
+  it("ignores corrupt store files and invalid tenant overrides", () => {
+    fs.mkdirSync(path.dirname(STORE), { recursive: true });
+    fs.writeFileSync(STORE, "{not-json", "utf8");
+    expect(loadDirectiveBudgetConfig("ghost").budgetLines).toBe(200);
+
+    fs.writeFileSync(
+      STORE,
+      JSON.stringify({ tenants: { bad: { budgetLines: -5, updatedAt: "t" } } }),
+      "utf8"
+    );
+    expect(loadDirectiveBudgetConfig("bad").budgetLines).toBe(200);
   });
 
   it("persists per-tenant override", () => {
