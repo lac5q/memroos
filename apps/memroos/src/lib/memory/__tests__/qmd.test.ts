@@ -49,6 +49,18 @@ describe("QMD Serializer", () => {
     expect(() => finalizeQmdUpdate(db, "missing-update", "success")).toThrow(/not found/i);
   });
 
+  it("rethrows unexpected database errors during finalize", () => {
+    const broken = {
+      prepare: () => ({
+        get: () => {
+          throw new Error("disk failure");
+        },
+        run: () => undefined,
+      }),
+    } as unknown as Database.Database;
+    expect(() => finalizeQmdUpdate(broken, "id-1", "success")).toThrow(/disk failure/);
+  });
+
   it("records cancelled outcomes without advancing last success", () => {
     const state = serializeQmdUpdate(db, "target/path3.md", "content3");
     const cancelled = finalizeQmdUpdate(db, state.id, "cancelled");

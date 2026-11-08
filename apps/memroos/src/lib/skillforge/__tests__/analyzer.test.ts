@@ -2,6 +2,7 @@
  * SkillForge Analyzer tests — Phase 86
  */
 
+import Database from "better-sqlite3";
 import { describe, it, expect } from "vitest";
 import { analyzeTelemetry, logFailure } from "../analyzer";
 import type { SkillForgeIntakeEntry, SkillForgeConfig } from "../types";
@@ -77,6 +78,69 @@ describe("SkillForge Analyzer", () => {
     const results = analyzeTelemetry(entries, config);
     // Telemetry entries without failures still produce analysis
     expect(results).toHaveLength(1);
+  });
+
+  it("suggests fixes for dispatch, eval, and contract failure classes", () => {
+    const entries = [
+      makeEntry("skill-fix", "failure", { dispatchStatus: "disabled", query: "deploy" }),
+      makeEntry("skill-fix", "failure", { passed: false, query: "eval case" }),
+      makeEntry("skill-fix", "failure", { query: "mismatch", expected: "a", actual: "b" }),
+    ];
+    const results = analyzeTelemetry(entries, config);
+    const fixes = results[0].patterns.map((pattern) => pattern.suggestedFix);
+    expect(fixes.some((fix) => fix?.includes("dispatch_status"))).toBe(true);
+    expect(fixes.some((fix) => fix?.includes("eval candidate"))).toBe(true);
+    expect(fixes.some((fix) => fix?.includes("trigger matching"))).toBe(true);
+  });
+
+  it("extracts patterns from payload.input when query is absent", () => {
+    const entries = [
+      makeEntry("skill-input", "failure", { input: "custom input path", expected: "x", actual: "y" }),
+    ];
+    const results = analyzeTelemetry(entries, config);
+    expect(results[0].patterns[0].pattern).toMatch(/custom input path/i);
+  });
+
+  it("persists analyzer failures into skillforge_failure_log", () => {
+    const db = new Database(":memory:");
+    db.exec(`
+      CREATE TABLE skillforge_failure_log (
+        id TEXT PRIMARY KEY,
+        operation TEXT NOT NULL,
+        input TEXT NOT NULL,
+        deterministic_result TEXT,
+        llm_result TEXT,
+        pattern TEXT NOT NULL,
+        skill_id TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+      );
+    `);
+    logFailure(db, {
+      operation: "analyze",
+      input: "bad payload",
+      deterministicResult: "deny",
+      llmResult: null,
+      pattern: "contract_incomplete",
+      skillId: "skill-1",
+    });
+    const row = db
+      .prepare(`SELECT operation, input, pattern, skill_id FROM skillforge_failure_log LIMIT 1`)
+      .get() as { operation: string; input: string; pattern: string; skill_id: string };
+    expect(row).toMatchObject({
+      operation: "analyze",
+      input: "bad payload",
+      pattern: "contract_incomplete",
+      skill_id: "skill-1",
+    });
+    db.close();
+  });
+
+  it("uses default suggested fix for unknown failure class", () => {
+    const entries = [
+      makeEntry("skill-unknown", "failure", { query: "weird case", note: "no dispatch flags" }),
+    ];
+    const results = analyzeTelemetry(entries, config);
+    expect(results[0].patterns[0].suggestedFix).toContain("Review skill implementation");
   });
 
   it("sorts results by confidence descending", () => {
