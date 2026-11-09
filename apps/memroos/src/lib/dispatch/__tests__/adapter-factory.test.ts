@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
 import { selectAdapter } from "../adapter-factory";
+import { a2aAdapter } from "../a2a-adapter";
 import { hivePollAdapter } from "../hive-poll-adapter";
 import { openclawAdapter } from "../openclaw-adapter";
 import type { RemoteAgentConfig } from "@/types";
@@ -19,6 +20,21 @@ function makeAgent(id: string, platform: RemoteAgentConfig["platform"]): RemoteA
 }
 
 describe("selectAdapter", () => {
+  it("a2a protocol -> a2a adapter", () => {
+    expect(
+      selectAdapter({
+        ...makeAgent("remote-a2a", "claude"),
+        protocol: "a2a",
+      })
+    ).toBe(a2aAdapter);
+  });
+
+  it("unknown platform falls back to hive-poll", () => {
+    expect(selectAdapter(makeAgent("unknown", "unknown-platform" as RemoteAgentConfig["platform"]))).toBe(
+      hivePollAdapter
+    );
+  });
+
   it("sophia (claude) -> hive-poll", () => {
     expect(selectAdapter(makeAgent("sophia", "claude"))).toBe(hivePollAdapter);
   });

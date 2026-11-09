@@ -197,6 +197,22 @@ describe("SkillsRegistryPage", () => {
     );
   });
 
+  it("shows registry loading spinner while fetch is pending", () => {
+    api.useSkillRegistry.mockReturnValue({
+      data: undefined,
+      error: null,
+      isLoading: true,
+      isError: false,
+    });
+    api.useSkillSuggestions.mockReturnValue({
+      data: { suggestions: [], ok: true, windowDays: 30, timestamp: "2026-01-01T00:00:00.000Z" },
+      isLoading: false,
+      isError: false,
+    });
+    const { container } = render(<SkillsRegistryPage />);
+    expect(container.querySelector(".animate-spin")).toBeTruthy();
+  });
+
   it("links to the cookbooks page for filesystem-discovered skills", () => {
     render(<SkillsRegistryPage />);
 

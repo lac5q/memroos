@@ -12,6 +12,7 @@ import {
   executeDsarDelete,
   submitDsarRequest,
 } from "../dsar";
+import { sha256Hex } from "../retention-policy";
 
 const VAULT_ROOT = path.join(os.tmpdir(), `dsar-test-${crypto.randomUUID()}`);
 
@@ -279,6 +280,89 @@ describe("VAL-MEM-027: DSAR export/delete is identity-verified and complete", ()
     expect(result.ok).toBe(false);
     expect(result.status).toBe("denied");
     expect(result.reason).toBe("missing_subject_identity");
+  });
+
+  it("executeDsarDelete fails closed for missing, non-delete, and planless requests", async () => {
+    const database = freshDb();
+    const missing = await executeDsarDelete(database, {
+      tenantId: "default-tenant",
+      requestId: "dsar_missing",
+      planHash: "abc",
+      actorId: "operator",
+    });
+    expect(missing.status).toBe("failed");
+    expect(missing.reason).toBe("dsar_request_not_found");
+
+    seedMessage(database, "export-only");
+    const verificationHash = computeDsarVerificationHash({
+      subject: { subjectId: "export-only" },
+      verificationMethod: "email_token",
+      actorId: "operator",
+      tenantId: "default-tenant",
+    });
+    const exported = submitDsarRequest(database, {
+      tenantId: "default-tenant",
+      requestType: "export",
+      subject: { subjectId: "export-only" },
+      scope: { tenantId: "default-tenant", purpose: "recall", project: "alpha" },
+      verificationMethod: "email_token",
+      verificationHash,
+      actorId: "operator",
+    });
+    expect(exported.status).toBe("exported");
+    const wrongType = await executeDsarDelete(database, {
+      tenantId: "default-tenant",
+      requestId: exported.requestId,
+      planHash: "abc",
+      actorId: "operator",
+    });
+    expect(wrongType.reason).toBe("dsar_request_not_delete");
+
+    database
+      .prepare(
+        `INSERT INTO memory_dsar_requests
+          (id, tenant_id, request_type, subject_hash, selector_hashes_json, verification_method,
+           verification_hash, scope_json, scope_hash, status, result_json, created_by, created_at)
+         VALUES (?, ?, 'delete', ?, '{}', 'email_token', ?, '{}', ?, 'verified', '{}', ?, ?)`
+      )
+      .run(
+        "dsar_no_plan",
+        "default-tenant",
+        sha256Hex("subject"),
+        verificationHash,
+        "scope-hash",
+        "operator",
+        "2026-01-01T00:00:00.000Z"
+      );
+    const noPlan = await executeDsarDelete(database, {
+      tenantId: "default-tenant",
+      requestId: "dsar_no_plan",
+      planHash: "abc",
+      actorId: "operator",
+    });
+    expect(noPlan.reason).toBe("dsar_plan_missing");
+  });
+
+  it("rejects missing scope tenant", () => {
+    const database = freshDb();
+    seedMessage(database, "subject-tenant");
+    const verificationHash = computeDsarVerificationHash({
+      subject: { subjectId: "subject-tenant" },
+      verificationMethod: "email_token",
+      actorId: "operator",
+      tenantId: "default-tenant",
+    });
+    const result = submitDsarRequest(database, {
+      tenantId: "default-tenant",
+      requestType: "export",
+      subject: { subjectId: "subject-tenant" },
+      scope: { tenantId: "", purpose: "recall", project: "alpha" },
+      verificationMethod: "email_token",
+      verificationHash,
+      actorId: "operator",
+    });
+    expect(result.status).toBe("denied");
+    expect(result.reason).toBe("missing_tenant");
   });
 
   it("rejects missing scope purpose", () => {
