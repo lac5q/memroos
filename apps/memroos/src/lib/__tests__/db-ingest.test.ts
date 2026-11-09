@@ -89,6 +89,10 @@ describe('db-ingest: deriveAgentId', () => {
   it('Test 3: deriveAgentId("") returns "claude-code" (fallback)', () => {
     expect(deriveAgentId('')).toBe('claude-code');
   });
+
+  it('Test 3b: deriveAgentId uses the last path segment for short decoded paths', () => {
+    expect(deriveAgentId('-Users-jdoe')).toBe('jdoe');
+  });
 });
 
 describe('db-ingest: extractContent', () => {
@@ -340,6 +344,17 @@ describe('db-ingest: direct provider file ingestion', () => {
     expect(rows.every((row) => row.project === 'hermes')).toBe(true);
     expect(rows.every((row) => row.agent_id === 'hermes')).toBe(true);
     expect(rows.map((row) => row.role).sort()).toEqual(['assistant', 'user']);
+  });
+
+  it('ingestHermesFile skips malformed JSONL lines', () => {
+    const filePath = path.join(TEST_DB_DIR, 'hermes-sessions', 'sess-h-bad.jsonl');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(
+      filePath,
+      `{not-json\n${JSON.stringify({ role: 'user', content: 'kept', timestamp: '2025-01-01T00:00:00Z' })}\n`
+    );
+    const inserted = ingestHermesFile(db, filePath);
+    expect(inserted).toBe(1);
   });
 
   it('ingestHermesFile skips unsupported role, non-string content, and empty content', () => {
