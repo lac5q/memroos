@@ -1,0 +1,16 @@
+{
+  "name": "@memroos/open-core",
+  "version": "0.1.0",
+  "description": "Standalone Apache-2.0 MemroOS memory core and contracts.",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm test --workspaces"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

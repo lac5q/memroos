@@ -1,0 +1,45 @@
+{
+  "name": "@memroos/memory-contracts",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "description": "dependency-free OpenAI memory wire contract primitives.",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "dist",
+    "test",
+    "README.md",
+    "LICENSE",
+    "tsconfig.json",
+    "scripts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "check:build": "node scripts/build.mjs --check"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lac5q/memroos.git",
+    "directory": "open-core/packages/memory-contracts"
+  },
+  "bugs": {
+    "url": "https://github.com/lac5q/memroos/issues"
+  },
+  "homepage": "https://github.com/lac5q/memroos"
+}

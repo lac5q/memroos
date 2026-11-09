@@ -1,0 +1,79 @@
+{
+  "name": "@memroos/memory-core",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "sideEffects": false,
+  "description": "deterministic memory policy, scope, ranking, retrieval-query, hashing, and trained-ranking primitives.",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "dist",
+    "test",
+    "README.md",
+    "LICENSE",
+    "tsconfig.json",
+    "scripts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./ranking": {
+      "types": "./dist/ranking.d.ts",
+      "import": "./dist/ranking.js",
+      "default": "./dist/ranking.js"
+    },
+    "./retrieval-query": {
+      "types": "./dist/retrieval-query.d.ts",
+      "import": "./dist/retrieval-query.js",
+      "default": "./dist/retrieval-query.js"
+    },
+    "./hash": {
+      "types": "./dist/hash.d.ts",
+      "import": "./dist/hash.js",
+      "default": "./dist/hash.js"
+    },
+    "./trained-ranking-contract": {
+      "types": "./dist/trained-ranking-contract.d.ts",
+      "import": "./dist/trained-ranking-contract.js",
+      "default": "./dist/trained-ranking-contract.js"
+    },
+    "./memory-policy": {
+      "types": "./dist/memory-policy.d.ts",
+      "import": "./dist/memory-policy.js",
+      "default": "./dist/memory-policy.js"
+    },
+    "./memory-scope": {
+      "types": "./dist/memory-scope.d.ts",
+      "import": "./dist/memory-scope.js",
+      "default": "./dist/memory-scope.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "check:build": "node scripts/build.mjs --check"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.39",
+    "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lac5q/memroos.git",
+    "directory": "open-core/packages/memory-core"
+  },
+  "bugs": {
+    "url": "https://github.com/lac5q/memroos/issues"
+  },
+  "homepage": "https://github.com/lac5q/memroos"
+}

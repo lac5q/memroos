@@ -1,0 +1,167 @@
+{
+  "status": "draft-review",
+  "license": "Apache-2.0",
+  "scope": "Deterministic memory core and wire contracts only",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "path": "NOTICE",
+      "sha256": "29a5c122df4fcbed6f7a5aa3ed207e5474e90545567c6e6f249c96571743d349",
+      "bytes": 166
+    },
+    {
+      "path": "README.md",
+      "sha256": "8c704b50122f9da0b91d6d4aea7bfec45664c7f3e7600779ee0b28dacbc0f5f8",
+      "bytes": 482
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "d20a69f22e87ba69ec5214a6cb6e6505f6ca6fc61ef62f9e1bf57440f836bfb1",
+      "bytes": 2667
+    },
+    {
+      "path": "package.json",
+      "sha256": "68bc4c485ba1add7ad5b4d9f873475d58d2b789da3ed4c903dc04937ffed5627",
+      "bytes": 339
+    },
+    {
+      "path": "packages/memory-contracts/.gitignore",
+      "sha256": "3366270a35051310151cc7485af1a752520825b305ebe7b68e0f177f74117ee4",
+      "bytes": 47
+    },
+    {
+      "path": "packages/memory-contracts/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "path": "packages/memory-contracts/README.md",
+      "sha256": "b43201f13f9dd2ef30d132adb238756ebbb738520b5862c9d0b885634ed2558c",
+      "bytes": 678
+    },
+    {
+      "path": "packages/memory-contracts/package.json",
+      "sha256": "d5b8bbdc753e16acefbec776f244612c2ad12537cb01e37c76c1c1025b77793d",
+      "bytes": 1056
+    },
+    {
+      "path": "packages/memory-contracts/scripts/build.mjs",
+      "sha256": "58bc9cab28518586ccf526d5958c9398f71ee2bc5b1cb30c8452f646ccc547be",
+      "bytes": 3568
+    },
+    {
+      "path": "packages/memory-contracts/src/index.ts",
+      "sha256": "8f63f382193abe5a3549015cd5478c458dc74dfe4daa4315cbc632920689811e",
+      "bytes": 13033
+    },
+    {
+      "path": "packages/memory-contracts/test/memory-contracts.test.mjs",
+      "sha256": "acaa6e4d0b4a0a61630633f87fdf3dd2d26be8ba99e061f105a82d5c48c9e352",
+      "bytes": 4942
+    },
+    {
+      "path": "packages/memory-contracts/tsconfig.json",
+      "sha256": "4e7e172976b771603fed00dd82b5b8664e1c915e1850b43c247e985494c917bc",
+      "bytes": 295
+    },
+    {
+      "path": "packages/memory-core/.gitignore",
+      "sha256": "3366270a35051310151cc7485af1a752520825b305ebe7b68e0f177f74117ee4",
+      "bytes": 47
+    },
+    {
+      "path": "packages/memory-core/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "path": "packages/memory-core/README.md",
+      "sha256": "cd20981066a7c98d2c082e9a3274d835f6af86c42c8faf801b1c634669659dee",
+      "bytes": 2682
+    },
+    {
+      "path": "packages/memory-core/package.json",
+      "sha256": "d7bf80c7f703422e61387dece3632419c2d67a15d2f17d15c1ae39a69999fa28",
+      "bytes": 2130
+    },
+    {
+      "path": "packages/memory-core/scripts/build.mjs",
+      "sha256": "23a27ea1ebe6f1676484c912fa3ffbeedc91e119a8fdb1e38b4cba2d202f6829",
+      "bytes": 3794
+    },
+    {
+      "path": "packages/memory-core/src/hash.ts",
+      "sha256": "9a6e0a6270184d782a8cfc2a4f2185c68ca6ec1a8a5dbd441e92dda86befef43",
+      "bytes": 696
+    },
+    {
+      "path": "packages/memory-core/src/index.ts",
+      "sha256": "9f58759464b0647fe06ed103a935f48df7a49fbf2209ea898be462055b91d1be",
+      "bytes": 213
+    },
+    {
+      "path": "packages/memory-core/src/memory-policy.ts",
+      "sha256": "033b4acdcad7ca472f1fd499c15f5ea24b6afe8088d69f1471efcf8987b8d0a5",
+      "bytes": 8429
+    },
+    {
+      "path": "packages/memory-core/src/memory-scope.ts",
+      "sha256": "7ebd2c38653012c5fd53df43f09945a2c61f95348b0ca1e838c79dd6cc37ca14",
+      "bytes": 4018
+    },
+    {
+      "path": "packages/memory-core/src/ranking.ts",
+      "sha256": "8f0d8f91b231f88bf3102aa67098fd9ef990a98a3891899fa0fc2ecaecaeb03e",
+      "bytes": 9173
+    },
+    {
+      "path": "packages/memory-core/src/retrieval-query.ts",
+      "sha256": "8e4e00503c8e84fed3f85a357ac331fdddaf0ab0b225f23555229645b6cf4c2f",
+      "bytes": 7585
+    },
+    {
+      "path": "packages/memory-core/src/trained-ranking-contract.ts",
+      "sha256": "f0b7314514066a2f01b4ce331253672e2c2d727748c9901e98a038b2702de7c2",
+      "bytes": 1073
+    },
+    {
+      "path": "packages/memory-core/test/evidence-token-matching.test.mjs",
+      "sha256": "86aadefaf2ab0ac33a84d7708bc8d8b606f925a907ec607a483caf5343fb8b97",
+      "bytes": 2267
+    },
+    {
+      "path": "packages/memory-core/test/memory-core.test.mjs",
+      "sha256": "46e360bb2d67dd302c13f93361af8b61267cbd4c1f9a9d232f1f7183bc5d243a",
+      "bytes": 6494
+    },
+    {
+      "path": "packages/memory-core/test/memory-policy-scope.test.mjs",
+      "sha256": "9247319865b75cc93d40958850c0654ff86357a8adfb962d5745f4635ea94754",
+      "bytes": 8828
+    },
+    {
+      "path": "packages/memory-core/test/packed-policy-consumer.test.mjs",
+      "sha256": "fc5f2b06b130dcbf24d2e3e04b60925548f56332e45747cecdbcfdad97d9f740",
+      "bytes": 12925
+    },
+    {
+      "path": "packages/memory-core/test/retrieval-query-punctuation.test.mjs",
+      "sha256": "81b7fbc810b6b3b34891ee361593c48e0978960491645ef6d2de936ede983d9b",
+      "bytes": 465
+    },
+    {
+      "path": "packages/memory-core/tsconfig.json",
+      "sha256": "4e7e172976b771603fed00dd82b5b8664e1c915e1850b43c247e985494c917bc",
+      "bytes": 295
+    }
+  ],
+  "notes": [
+    "This manifest excludes RELEASE-MANIFEST.json itself.",
+    "Standalone demand-test candidate; not public approval.",
+    "No hosted operations, customer data, credentials, logs, or private integrations included."
+  ]
+}
