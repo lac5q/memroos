@@ -68,17 +68,23 @@ describe("GSD skill boundary + discuss", () => {
     const db = getDb();
     seedSkill(db, { name: "unsafe-skill", owner: null, rawBody: "run rm -rf /" });
     seedSkill(db, { name: "good-skill", owner: "ops", verificationChecks: "npm test", sourceHarness: "codex" });
+    seedSkill(db, { name: "dup-skill", owner: "ops", sourceHarness: "cursor" });
+    seedSkill(db, { name: "dup-skill", owner: "ops", sourceHarness: "codex" });
 
     const { auditRegisteredSkills } = await import("@/lib/gsd/skill-boundary");
     const result = auditRegisteredSkills(db, { persistProposals: true });
 
-    expect(result.skillsScanned).toBe(2);
+    expect(result.skillsScanned).toBe(4);
+    expect(result.findings.some((finding) => finding.code === "duplicate_trigger")).toBe(true);
     expect(result.findings.some((finding) => finding.code === "missing_owner")).toBe(true);
     expect(result.findings.some((finding) => finding.code === "unsafe_tool_instructions")).toBe(true);
     expect(result.proposalDrafts.length).toBeGreaterThan(0);
 
     const rows = db.prepare("SELECT COUNT(*) AS count FROM skill_registry").get() as { count: number };
-    expect(rows.count).toBe(2);
+    expect(rows.count).toBe(4);
+
+    const noPersist = auditRegisteredSkills(db, { persistProposals: false });
+    expect(noPersist.persistedProposalIds).toEqual([]);
   });
 
   it("blocks discuss council without validator pass", async () => {
@@ -103,6 +109,53 @@ describe("GSD skill boundary + discuss", () => {
     });
 
     expect(result.blockedReasons).toContain("validator pass is required before ledgering council output.");
+    expect(result.ledgerReceiptId).toBe(0);
+  });
+
+  it("throws when required discuss council fields are missing", async () => {
+    const { getDb } = await loadDb();
+    const { runBoundedDiscussCouncil } = await import("@/lib/gsd/discuss");
+    expect(() =>
+      runBoundedDiscussCouncil(getDb(), {
+        goalId: "",
+        actorAgentId: "agent-alpha",
+        topic: "x",
+        roles: [{ role: "validator", agentId: "v", mandate: "v" }],
+        taskBudget: { maxRounds: 2, maxAgents: 4 },
+        verdict: {
+          decision: "approve",
+          summary: "ok",
+          actionItems: [],
+          risks: [],
+          validatorPass: true,
+        },
+      })
+    ).toThrow(/goalId/);
+  });
+
+  it("blocks discuss council when task budget and roles are invalid", async () => {
+    const { getDb } = await loadDb();
+    const { runBoundedDiscussCouncil } = await import("@/lib/gsd/discuss");
+    const result = runBoundedDiscussCouncil(getDb(), {
+      goalId: "goal-budget",
+      actorAgentId: "agent-alpha",
+      topic: "Budget bounds",
+      roles: [
+        { role: "chair", agentId: "agent-alpha", mandate: "lead" },
+        { role: "not-a-role" as never, agentId: "agent-beta", mandate: "bad" },
+        { role: "validator", agentId: "agent-gamma", mandate: "validate" },
+      ],
+      taskBudget: { maxRounds: 9, maxAgents: 2 },
+      verdict: {
+        decision: "approve",
+        summary: "Should block",
+        actionItems: [],
+        risks: [],
+        validatorPass: true,
+      },
+    });
+    expect(result.blockedReasons.some((reason) => reason.includes("maxRounds"))).toBe(true);
+    expect(result.blockedReasons.some((reason) => reason.includes("invalid roles"))).toBe(true);
     expect(result.ledgerReceiptId).toBe(0);
   });
 

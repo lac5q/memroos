@@ -196,6 +196,42 @@ describe("matchDimensions — action matching", () => {
   });
 });
 
+describe("matchDimensions — ontology and belief object fields", () => {
+  it("matches ontologyType and beliefStage with scalar request values", () => {
+    const rule: PolicyDimensionRule = {
+      object: { ontologyType: ["memory.record"], beliefStage: ["candidate"] },
+      effect: "deny",
+    };
+    expect(
+      matchDimensions(rule, {
+        object: { ontologyType: "memory.record", beliefStage: "candidate" },
+      }),
+    ).toBe(true);
+    expect(
+      matchDimensions(rule, {
+        object: { ontologyType: "memory.record", beliefStage: "promoted" },
+      }),
+    ).toBe(false);
+  });
+
+  it("matches scalar subject team and role arrays on the request side", () => {
+    const rule: PolicyDimensionRule = {
+      subject: { team: ["GTM", "OPS"], role: ["admin"] },
+      effect: "deny",
+    };
+    expect(matchDimensions(rule, { subject: { team: "GTM", role: "admin" } })).toBe(true);
+    expect(matchDimensions(rule, { subject: { team: "ENG", role: "admin" } })).toBe(false);
+  });
+
+  it("does not match when rule action array is empty", () => {
+    const rule: PolicyDimensionRule = {
+      action: [],
+      effect: "deny",
+    };
+    expect(matchDimensions(rule, { action: "export" })).toBe(true);
+  });
+});
+
 describe("matchDimensions — wildcard rules", () => {
   it("a rule with no specified fields matches everything", () => {
     const rule: PolicyDimensionRule = {

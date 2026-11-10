@@ -101,6 +101,11 @@ describe("workflow/topology", () => {
     expect(t.notices.join(" ")).toMatch(/keep the map readable/i);
   });
 
+  it("notices when no external sources are connected", () => {
+    const t = buildTopology(db, { agents: [], sources: [] });
+    expect(t.notices.join(" ")).toMatch(/no connected sources/i);
+  });
+
   it("derives sources from connected providers", () => {
     const t = buildTopology(db, {
       agents: [],

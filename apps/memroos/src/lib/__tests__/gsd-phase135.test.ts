@@ -78,5 +78,12 @@ describe("GSD lane evals + model routing policy", () => {
       highRisk: true,
     });
     expect(validator.tier).toBe("validator");
+
+    const vision = routeGsdModel(getDb(), {
+      taskClass: "formatting",
+      agentId: "agent-alpha",
+      multimodal: true,
+    });
+    expect(vision.tier).toBe("vision");
   });
 });

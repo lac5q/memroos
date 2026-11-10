@@ -15,6 +15,12 @@ describe("memory tier routing", () => {
     expect(resolveMemoryTier({ type: "note" })).toBe("episodic");
   });
 
+  it("reads tier hints from metadata when type is absent", () => {
+    expect(resolveMemoryTier({ content: "fact", metadata: { tier: "semantic" } })).toBe("vector");
+    expect(resolveMemoryTier({ content: "event", metadata: { tier: "conversation" } })).toBe("episodic");
+    expect(resolveMemoryTier({ content: "fallback" })).toBe("episodic");
+  });
+
   it("adds tier metadata without dropping caller metadata", () => {
     expect(
       buildTieredMemoryPayload({ content: "Luis founded Memroos", type: "graph", metadata: { source: "test" } })
