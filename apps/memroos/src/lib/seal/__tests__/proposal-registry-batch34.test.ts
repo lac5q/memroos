@@ -8,13 +8,17 @@ import { PROPOSAL_TYPES } from "../proposal-registry";
 
 let testDb: Database.Database;
 
+const agentId = `agent-b34-${randomUUID().slice(0, 8)}`;
+
 beforeEach(() => {
   testDb = new Database(":memory:");
   initSchema(testDb);
-  const agentId = `agent-b34-${randomUUID().slice(0, 8)}`;
-  testDb.prepare(
-    "INSERT INTO registered_agents (id, name, role, platform, protocol, registered_at, updated_at) VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
-  ).run(agentId, "Batch34 Agent", "Worker", "codex", "rest");
+  testDb
+    .prepare(
+      `INSERT INTO registered_agents (id, name, role, platform, protocol)
+       VALUES (?, 'Batch34 Agent', 'Worker', 'codex', 'rest')`,
+    )
+    .run(agentId);
 });
 
 afterEach(() => {
@@ -25,7 +29,6 @@ describe("proposal-registry batch34", () => {
   it.skip("resolveDb default require('@/lib/db') (24-25) — Vitest alias prevents CJS fallback", () => {});
 
   it("instruction_update rollbackShadow restores prior active rows (304)", () => {
-    const agentId = testDb.prepare("SELECT id FROM registered_agents LIMIT 1").pluck().get() as string;
     testDb.prepare(
       "INSERT INTO agent_instructions (agent_id, instructions_text, version, is_active) VALUES (?, ?, 1, 1)",
     ).run(agentId, "before b34");
@@ -45,7 +48,6 @@ describe("proposal-registry batch34", () => {
   });
 
   it("tool_routing_update rollbackShadow restores deactivated policy rows (435)", () => {
-    const agentId = testDb.prepare("SELECT id FROM registered_agents LIMIT 1").pluck().get() as string;
     testDb.prepare(
       `INSERT INTO agent_tool_routing_policies (agent_id, tool_name, context_pattern, preference_weight, is_active)
        VALUES (?, 'grep', '*', 0.5, 1)`,
