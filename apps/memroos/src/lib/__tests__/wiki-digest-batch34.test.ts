@@ -66,6 +66,7 @@ describe("wiki-digest batch34 — watermark, fallback, and skip branches", () =>
       knowledgeBasePath: kb,
       dryRun: true,
       db,
+      agentId: "codex",
       fetchMemories: async () => {
         throw new Error("mem0_down_b34");
       },
