@@ -63,10 +63,13 @@ describe("operator-approval batch34 — gated approve, request_changes, rollback
       reasoning: "needs work",
     });
     expect(rejected.success).toBe(true);
-    const sealRow = db
-      .prepare(`SELECT event FROM seal_audit_log WHERE proposal_id = ? ORDER BY timestamp DESC LIMIT 1`)
-      .get(sealId) as { event: string };
-    expect(sealRow.event).toBe("rejected");
+    expect(rejected.postState).toBe("rejected");
+    // Approve + reject can share the same second-resolution timestamp; assert both
+    // seal events exist rather than relying on ORDER BY timestamp alone.
+    const sealEvents = db
+      .prepare(`SELECT event FROM seal_audit_log WHERE proposal_id = ?`)
+      .all(sealId) as Array<{ event: string }>;
+    expect(sealEvents.map((row) => row.event).sort()).toEqual(["approved", "rejected"]);
   });
 
   it("request_changes moves proposal back to pending", () => {
