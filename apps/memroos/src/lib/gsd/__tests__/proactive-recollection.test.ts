@@ -199,5 +199,61 @@ describe("Phase 118 proactive recollection", () => {
 
     expect(skippedPack.receipt.action).toBe("skip");
     expect(skippedPack.receipt.reason).toContain("No task text");
+    expect(skippedPack.receipt.authorization).toBe(skippedDecision.authorization);
+  });
+
+  it("returns disabled skip when proactive recollection is turned off", () => {
+    const decision = evaluateRecollectionTrigger({
+      timing: "before_tool_use",
+      taskText: "format output",
+      projectId: "memroos",
+      enabled: false,
+    });
+    expect(decision.action).toBe("skip");
+    expect(decision.skipReason).toBe("disabled");
+    expect(planRecollectionQueries({ decision, taskText: "format output", projectId: "memroos" })).toEqual([]);
+  });
+
+  it("breaks score ties lexicographically and drops empty budget slices", async () => {
+    const { rankRecollectionCandidates, assembleRecollectionContextPack, evaluateRecollectionTrigger } =
+      await import("../proactive-recollection");
+    const ranked = rankRecollectionCandidates(
+      [
+        {
+          id: "b-candidate",
+          text: "second",
+          tier: "episodic",
+          relevance: 0.5,
+          importance: 0.5,
+          observedAt: "2026-06-25T00:00:00Z",
+        },
+        {
+          id: "a-candidate",
+          text: "first",
+          tier: "episodic",
+          relevance: 0.5,
+          importance: 0.5,
+          observedAt: "2026-06-25T00:00:00Z",
+        },
+      ],
+      { now: "2026-06-25T00:00:00Z" },
+    );
+    expect(ranked.map((entry) => entry.id)).toEqual(["a-candidate", "b-candidate"]);
+
+    const decision = evaluateRecollectionTrigger({
+      timing: "before_plan",
+      taskText: "ship recollection coverage",
+      projectId: "memroos",
+    });
+    const pack = assembleRecollectionContextPack({
+      decision,
+      plans: [],
+      rankedCandidates: ranked.map((entry) => ({ ...entry, text: "   " })),
+      scoreThreshold: 0,
+      maxItems: 5,
+      maxChars: 10,
+    });
+    expect(pack.entries).toEqual([]);
+    expect(pack.receipt.ignored.every((entry) => entry.reason === "pack_budget_exhausted")).toBe(true);
   });
 });

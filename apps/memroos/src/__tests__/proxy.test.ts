@@ -558,4 +558,85 @@ describe("proxy", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://memroos.com/");
   });
+
+  it("lets the public tools provider catalog respond without a session token", async () => {
+    const response = await proxy(
+      new NextRequest("http://localhost:3002/api/tools/providers", {
+        method: "GET",
+        headers: { host: "localhost:3002" },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+
+  it("allows reviewer JWT access to protected API routes that are not operator-only", async () => {
+    setJwtSecret();
+    const token = await signAccessToken("reviewer-user", "reviewer");
+    const response = await proxy(
+      new NextRequest("http://localhost:3002/api/cron-health", {
+        method: "GET",
+        headers: { host: "localhost:3002", authorization: `Bearer ${token}` },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+
+  it("accepts session cookies for protected API routes when Authorization is absent", async () => {
+    setJwtSecret();
+    const token = await signAccessToken("reviewer-user", "reviewer");
+    const response = await proxy(
+      new NextRequest("http://localhost:3002/api/cron-health", {
+        method: "GET",
+        headers: { host: "localhost:3002", cookie: `access_token=${token}` },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("");
+  });
+
+  it("serves authenticated UI routes when a valid access_token cookie is present", async () => {
+    setJwtSecret();
+    const token = await signAccessToken("operator-user", "operator");
+    const response = await proxy(
+      new NextRequest("https://memroos.example.com/dispatch", {
+        headers: { host: "memroos.example.com", cookie: `access_token=${token}` },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("redirects UI routes to login when the access_token cookie is invalid", async () => {
+    setJwtSecret();
+    const expired = await expiredAccessToken("operator-user", "operator");
+    const response = await proxy(
+      new NextRequest("https://memroos.example.com/dispatch", {
+        headers: { host: "memroos.example.com", cookie: `access_token=${expired}` },
+      })
+    );
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("https://memroos.example.com/login");
+  });
+
+  it("includes unsafe-eval in CSP when NODE_ENV is not production", async () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = "development";
+    try {
+      const response = await proxy(
+        new NextRequest("https://memroos.com/", {
+          headers: { host: "memroos.com" },
+        })
+      );
+      expect(response.headers.get("Content-Security-Policy")).toContain("'unsafe-eval'");
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+  });
 });
