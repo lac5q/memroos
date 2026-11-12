@@ -35,6 +35,8 @@ vi.mock("@/lib/knowledge-collections", async () => {
   };
 });
 
+const { authenticateUser } = await import("@/lib/auth/session");
+
 const { initSchema } = await import("@/lib/db-schema");
 initSchema(testDb);
 
@@ -65,7 +67,22 @@ function seedMessage(id: string, consolidated = 0) {
 }
 
 describe("GET /api/memory-inventory", () => {
+  it("returns 401 when the session is missing", async () => {
+    vi.mocked(authenticateUser).mockResolvedValueOnce(null);
+    const { GET } = await import("../route");
+    const res = await GET(new Request("http://localhost/api/memory-inventory") as never);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: "authentication required" });
+  });
+
   beforeEach(() => {
+    vi.mocked(authenticateUser).mockResolvedValue({
+      userId: "test-user",
+      role: "operator",
+      email: "",
+      displayName: "",
+      tenantId: "default",
+    });
     vi.resetModules();
     vi.stubGlobal(
       "fetch",
