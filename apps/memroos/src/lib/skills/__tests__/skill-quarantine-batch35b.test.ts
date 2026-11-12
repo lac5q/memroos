@@ -37,9 +37,11 @@ describe("skill-quarantine batch35b", () => {
     const db = new Database(":memory:");
     initSchema(db);
     const { scoreVerificationChecks } = await import("../skill-quarantine");
-    const score = scoreVerificationChecks("batch35b body includes typecheck", "must include npm test\nmust include typecheck");
-    expect(score).toBeGreaterThan(0);
-    expect(score).toBeLessThan(1);
+    const score = scoreVerificationChecks(
+      "batch35b verification body mentions typecheck only",
+      "- require playwright browser coverage\n- require typecheck gate",
+    );
+    expect(score).toBe(0.5);
     db.close();
   });
 });
