@@ -135,6 +135,81 @@ Use when validating workflow state.
     expect(invalidErr?.message).toBe("Invalid skill name");
   });
 
+  it("save-draft preserves the previous status when no explicit transition applies", async () => {
+    const { updateSkillReviewState } = await import("../skill-workflow");
+    await updateSkillReviewState({
+      skillName: "draft-skill",
+      action: "approve-general",
+      actor: "alice",
+    });
+    const saved = await updateSkillReviewState({
+      skillName: "draft-skill",
+      action: "save-draft",
+      notes: "wip",
+      actor: "alice",
+    });
+    expect(saved.status).toBe("approved");
+    expect(saved.notes).toBe("wip");
+  });
+
+  it("buildSkillWorkflowItems leaves agent-limited skills unreviewed when source exists", async () => {
+    writeSkill(
+      "limited-skill",
+      `---
+name: limited-skill
+description: Internal helper with no promotion keywords
+---
+# Limited
+Body present.
+`
+    );
+    const { buildSkillWorkflowItems } = await import("../skill-workflow");
+    const items = await buildSkillWorkflowItems({
+      skillsPath: skillsRoot,
+      skillNames: ["limited-skill"],
+      coverageGaps: [],
+      skillUsage: {},
+      reviewState: {},
+    });
+    expect(items[0]?.stage).toBe("agent-limited");
+    expect(items[0]?.reviewStatus).toBe("unreviewed");
+  });
+
+  it("buildSkillWorkflowItems infers enterprise and general stages from skill metadata", async () => {
+    writeSkill(
+      "enterprise-skill",
+      `---
+name: enterprise-skill
+description: Governance and compliance controls for regulated tenants
+---
+# Enterprise
+`
+    );
+    writeSkill(
+      "general-skill",
+      `---
+name: general-skill
+description: Use when coordinating operator workflows
+---
+# General
+`
+    );
+    const { buildSkillWorkflowItems } = await import("../skill-workflow");
+    const items = await buildSkillWorkflowItems({
+      skillsPath: skillsRoot,
+      skillNames: ["enterprise-skill", "general-skill"],
+      coverageGaps: [],
+      skillUsage: {},
+      reviewState: {},
+    });
+    const enterprise = items.find((i) => i.name === "enterprise-skill");
+    const general = items.find((i) => i.name === "general-skill");
+    expect(enterprise?.stage).toBe("enterprise");
+    expect(enterprise?.reviewStatus).toBe("enterprise-ready");
+    expect(general?.stage).toBe("general");
+    expect(general?.reviewStatus).toBe("approved");
+  });
+
   it("buildSkillWorkflowItems marks coverage gaps and missing sources", async () => {
     writeSkill(
       "gap-skill",

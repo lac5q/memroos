@@ -48,10 +48,30 @@ describe("VAL-ORCH-008 -- evaluateFederationPolicy", () => {
     if (r.kind === "allow") expect(r.policyVersion).toBe(FEDERATION_POLICY_VERSION);
   });
 
+  it("denies on space mismatch for scoped sources", () => {
+    const r = evaluateFederationPolicy({
+      source: okSource({ spaceId: "space-alpha" }),
+      context: {
+        ...okContext(),
+        actor: { ...okContext().actor, project: "space-beta" },
+      },
+    });
+    expect(r.kind).toBe("deny");
+    if (r.kind === "deny") expect(r.reason).toBe("space_mismatch");
+  });
+
   it("denies on purpose mismatch", () => {
     const r = evaluateFederationPolicy({ source: okSource({ purpose: "memory-promotion" }), context: okContext() });
     expect(r.kind).toBe("deny");
     if (r.kind === "deny") expect(r.reason).toBe("purpose_mismatch");
+  });
+
+  it("redacts when label policy requires redaction", () => {
+    const r = evaluateFederationPolicy({
+      source: okSource(),
+      context: { ...okContext(), label: { visibility: "internal", policy: "requires_redaction" } },
+    });
+    expect(r.kind).toBe("redact");
   });
 
   it("denies on label visibility:private", () => {

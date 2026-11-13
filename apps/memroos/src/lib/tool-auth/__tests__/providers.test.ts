@@ -121,6 +121,14 @@ describe("tool-auth/providers", () => {
     }
   });
 
+  it("getProvidersByCategory returns arrays for every category id", () => {
+    for (const category of PROVIDER_CATEGORIES) {
+      const providers = getProvidersByCategory(category);
+      expect(Array.isArray(providers)).toBe(true);
+    }
+    expect(getGroupedProviders().every((group) => group.providers.length >= 0)).toBe(true);
+  });
+
   it("getCategories returns ordered category metadata", () => {
     const cats = getCategories();
     expect(cats.map((c) => c.id)).toEqual([...PROVIDER_CATEGORIES]);
