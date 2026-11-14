@@ -275,6 +275,26 @@ describe("VAL-MEM-030: tombstones preserve continuity without payload", () => {
     expect(badReport.reason).toMatch(/derivative_inventory_hash mismatch/);
   });
 
+  it("rejects invalid timestamps when writing tombstones", () => {
+    const database = freshDb();
+    expect(() =>
+      writeTombstoneForErasure(database, {
+        tenantId: "default-tenant",
+        subjectHash: "subject-hash-bad-time",
+        canonicalId: "canon-bad",
+        recordType: "message",
+        recordId: "msg-bad",
+        recordIdHash: crypto.createHash("sha256").update("msg-bad").digest("hex"),
+        derivativeInventory: makeDerivativeInventory(),
+        erasureId: "erasure_bad",
+        scope: { tenantId: "default-tenant", purpose: "recall" },
+        outcome: "erased",
+        actorId: "operator",
+        createdAt: "not-a-date",
+      })
+    ).toThrow(/Invalid UTC timestamp/);
+  });
+
   it("listTombstones returns append-only ordering", () => {
     const database = freshDb();
     writeTombstoneForErasure(database, {
