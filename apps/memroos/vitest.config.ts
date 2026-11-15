@@ -43,6 +43,22 @@ const config: SupplementedUserWorkspaceConfig = {
     // and are still expected to finish well within this ceiling.
     testTimeout: 30_000,
     hookTimeout: 30_000,
+    // Keep shared test helpers (e.g. settings/tools test-helpers.tsx) out of
+    // the coverage denominator — they are test infrastructure, not product
+    // code. Defaults for node_modules/dist/etc. are listed explicitly because
+    // setting `coverage.exclude` replaces Vitest's built-in list.
+    coverage: {
+      exclude: [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/e2e/**",
+        "**/__tests__/**",
+        "**/src/test/**",
+        "**/*.d.ts",
+        "**/*{.,-}config.*",
+        "**/coverage/**",
+      ],
+    },
   },
   resolve: {
     alias: {

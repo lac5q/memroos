@@ -37,6 +37,20 @@ const config: SupplementedUserWorkspaceConfig = {
     // a generous ceiling so transient CI noise does not flake the run.
     testTimeout: 60_000,
     hookTimeout: 60_000,
+    // Mirror fast-suite coverage excludes so slow CI coverage does not
+    // count shared __tests__ helpers toward product coverage.
+    coverage: {
+      exclude: [
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/e2e/**",
+        "**/__tests__/**",
+        "**/src/test/**",
+        "**/*.d.ts",
+        "**/*{.,-}config.*",
+        "**/coverage/**",
+      ],
+    },
   },
   resolve: {
     alias: {
