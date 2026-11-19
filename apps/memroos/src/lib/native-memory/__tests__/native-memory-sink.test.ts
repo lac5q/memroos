@@ -21,6 +21,20 @@ describe("native-memory sink (ENTOPS-07 code slice)", () => {
     expect(filtered.sanitized).toContain("[REDACTED]");
   });
 
+  it("skips diff alerts when canonical content matches", () => {
+    const content = "line1\nline2\n";
+    const result = processNativeMemoryIngest({
+      source: "codex",
+      agentId: "agent-2",
+      userId: "user-2",
+      content,
+      memoryPath: "MEMORY.md",
+      canonicalContent: content,
+    });
+    expect(result.diff?.identical).toBe(true);
+    expect(result.alerts.some((a) => a.includes("directive_diff"))).toBe(false);
+  });
+
   it("returns replay + budget + warn-only diff; never deletes", () => {
     const local = "line1\nline2-extra\n";
     const canonical = "line1\nline2\n";
@@ -43,6 +57,18 @@ describe("native-memory sink (ENTOPS-07 code slice)", () => {
     expect(NATIVE_MEMORY_SINK_POLICY.neverAutoTrim).toBe(true);
     expect(NATIVE_MEMORY_SINK_POLICY.harnessWiring).toBe("hermes_observe_opt_in");
     expect(result.alerts.some((a) => a.includes("directive_diff"))).toBe(true);
+  });
+
+  it("omits directive diff when no canonical body is supplied", () => {
+    const result = processNativeMemoryIngest({
+      source: "codex",
+      agentId: "agent-no-canonical",
+      userId: "user-1",
+      content: "plain memory\n",
+      memoryPath: "MEMORY.md",
+    });
+    expect(result.diff).toBeNull();
+    expect(result.alerts.some((a) => a.includes("directive_diff"))).toBe(false);
   });
 
   it("does not auto-trim over-budget content — only warns", () => {

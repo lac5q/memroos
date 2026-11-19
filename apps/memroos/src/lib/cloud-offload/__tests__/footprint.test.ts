@@ -33,6 +33,26 @@ describe("cloud offload footprint inventory", () => {
     fs.rmSync(repo, { recursive: true, force: true });
   });
 
+  it("resolves home-relative store paths in default profiles", () => {
+    const repo = tmpRepo();
+    const runtime = defaultLocalStoreProfiles(repo).find((profile) => profile.id === "runtime-env");
+    expect(runtime?.path).toBe(path.join(fakeHome, ".memroos"));
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("walks nested directories when sizing sqlite-wal-shm data dir", () => {
+    const repo = tmpRepo();
+    const nested = path.join(repo, "data", "nested");
+    fs.mkdirSync(nested, { recursive: true });
+    fs.writeFileSync(path.join(nested, "chunk.bin"), "12345");
+
+    const inventory = collectLocalFootprintInventory(repo);
+    const dataDir = inventory.stores.find((store) => store.id === "sqlite-wal-shm");
+    expect(dataDir?.sizeBytes).toBeGreaterThanOrEqual(5);
+
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
   it("reports size, existence, total footprint, and pressure", () => {
     const repo = tmpRepo();
     fs.mkdirSync(path.join(repo, "data"), { recursive: true });

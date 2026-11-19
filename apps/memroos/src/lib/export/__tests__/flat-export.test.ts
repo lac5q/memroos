@@ -23,6 +23,35 @@ afterEach(() => {
 });
 
 describe("flat-export (ENTOPS-08)", () => {
+  it("falls back to flat tenant layout and default vault root env", () => {
+    const vaultRoot = path.join(tmpRoot, "knowledge");
+    const flatPath = path.join(vaultRoot, "legacy-tenant");
+    fs.mkdirSync(flatPath, { recursive: true });
+    expect(resolveTenantVaultPath("legacy-tenant", vaultRoot)).toBe(flatPath);
+
+    const prevKnowledge = process.env.KNOWLEDGE_ROOT;
+    process.env.KNOWLEDGE_ROOT = vaultRoot;
+    expect(resolveTenantVaultPath("missing-tenant")).toBe(
+      path.join(vaultRoot, "tenants", "missing-tenant"),
+    );
+    if (prevKnowledge === undefined) delete process.env.KNOWLEDGE_ROOT;
+    else process.env.KNOWLEDGE_ROOT = prevKnowledge;
+  });
+
+  it("skips git and node_modules when hashing and honors MEMORY.md", () => {
+    const vault = path.join(tmpRoot, "tenants", "scan");
+    fs.mkdirSync(path.join(vault, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(vault, ".git", "HEAD"), "ref");
+    fs.mkdirSync(path.join(vault, "node_modules", "pkg"), { recursive: true });
+    fs.writeFileSync(path.join(vault, "node_modules", "pkg", "index.js"), "ignored");
+    fs.writeFileSync(path.join(vault, "MEMORY.md"), "memory root\n");
+    fs.writeFileSync(path.join(vault, "notes.md"), "note\n");
+
+    const hashed = computeTreeHash(vault);
+    expect(hashed.fileCount).toBe(2);
+    expect(hashed.files.map((entry) => entry.relativePath).sort()).toEqual(["MEMORY.md", "notes.md"]);
+  });
+
   it("resolves operator tenants/<id> layout preferentially", () => {
     const vaultRoot = path.join(tmpRoot, "knowledge");
     const tenantsPath = path.join(vaultRoot, "tenants", "acme");

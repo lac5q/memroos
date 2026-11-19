@@ -478,4 +478,36 @@ describe("api-client", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
     unmount();
   });
+
+  it("patches agent display fields and invalidates the agents query", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        agent: { id: "hermes:claude", name: "Renamed", role: "ops" },
+        timestamp: "t",
+      })
+    );
+    await api.updateAgentDetails({ agentId: "hermes:claude", name: "Renamed", role: "ops" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/agents/hermes%3Aclaude",
+      expect.objectContaining({ method: "PATCH" })
+    );
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        agent: { id: "hermes:claude", name: "Renamed", role: "ops" },
+        timestamp: "t",
+      })
+    );
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result, unmount } = renderHook(() => api.useUpdateAgentDetailsMutation(), {
+      wrapper: wrap(queryClient),
+    });
+    await act(async () => {
+      await result.current.mutateAsync({ agentId: "hermes:claude", name: "Renamed" });
+    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["agents"] });
+    unmount();
+  });
 });

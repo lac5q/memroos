@@ -611,6 +611,170 @@ describe("AgentEngagementConsole", () => {
     });
   });
 
+  it("sorts common agents ahead of directory-only agents", () => {
+    vi.mocked(useAgents).mockReturnValue({
+      data: {
+        agents: [
+          {
+            ...mockAgents[1],
+            id: "directory-only-agent",
+            name: "Directory Only",
+            status: "idle",
+          },
+          mockAgents[0],
+        ],
+      },
+      isLoading: false,
+    } as ReturnType<typeof useAgents>);
+
+    render(<AgentEngagementConsole />);
+    const rosterButtons = screen.getAllByRole("button").filter((button) =>
+      button.textContent?.includes("Claude Sonnet Engineer") || button.textContent?.includes("Directory Only"),
+    );
+    expect(rosterButtons[0]?.textContent).toContain("Claude Sonnet Engineer");
+  });
+
+  it("parses plain-text chat errors without embedded JSON", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("upstream unavailable", { status: 503 }),
+    );
+
+    render(<AgentEngagementConsole />);
+    fireEvent.change(screen.getByLabelText("Direct message"), { target: { value: "ping" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Chat unavailable: upstream unavailable/)).toBeInTheDocument();
+    });
+  });
+
+  it("removes a room participant when toggled off", () => {
+    render(<AgentEngagementConsole />);
+    fireEvent.click(screen.getByRole("button", { name: "Group Room" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use all" }));
+    expect(screen.getByText(/2 participants/)).toBeInTheDocument();
+
+    const roomButtons = screen.getAllByRole("button", { name: /Room/i });
+    fireEvent.click(roomButtons[1]);
+    expect(screen.getByText(/1 participant/)).toBeInTheDocument();
+  });
+
+  it("resets room participants to the active preset", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(chatStream("Active preset reply"));
+
+    render(<AgentEngagementConsole />);
+    fireEvent.click(screen.getByRole("button", { name: "Group Room" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use active" }));
+    fireEvent.click(screen.getByRole("button", { name: /Start conference round/i }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalled();
+      expect(screen.getByText("Active preset reply")).toBeInTheDocument();
+    });
+  });
+
+  it("runs spoken room prompts with voice playback in room mode", async () => {
+    const play = vi.fn().mockResolvedValue(undefined);
+    class MockAudio {
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      play = play;
+      pause = vi.fn();
+    }
+    vi.stubGlobal("Audio", MockAudio as unknown as typeof Audio);
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:room-tts"),
+      revokeObjectURL: vi.fn(),
+    });
+
+    class MockRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "en-US";
+      onresult: ((event: { results: Array<{ 0: { transcript: string } }> }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        this.onresult?.({ results: [{ 0: { transcript: "room voice prompt" } }] });
+        this.onend?.();
+      }
+      stop() {}
+    }
+    vi.stubGlobal("SpeechRecognition", MockRecognition as unknown as typeof SpeechRecognition);
+    vi.stubGlobal("webkitSpeechRecognition", MockRecognition as unknown as typeof SpeechRecognition);
+
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(chatStream("Room voice reply"))
+      .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["audio"]) } as Response);
+
+    render(<AgentEngagementConsole />);
+    fireEvent.click(screen.getByRole("button", { name: "Group Room" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speak to room" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Room voice reply")).toBeInTheDocument();
+      expect(fetch).toHaveBeenCalledWith("/api/tts", expect.any(Object));
+    });
+  });
+
+  it("handles speech recognition errors in room mode", () => {
+    class MockRecognition {
+      continuous = false;
+      interimResults = false;
+      lang = "en-US";
+      onresult: ((event: { results: Array<{ 0: { transcript: string } }> }) => void) | null = null;
+      onerror: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      start() {
+        this.onerror?.();
+        this.onend?.();
+      }
+      stop() {}
+    }
+    vi.stubGlobal("SpeechRecognition", MockRecognition as unknown as typeof SpeechRecognition);
+    vi.stubGlobal("webkitSpeechRecognition", MockRecognition as unknown as typeof SpeechRecognition);
+
+    render(<AgentEngagementConsole />);
+    fireEvent.click(screen.getByRole("button", { name: "Group Room" }));
+    fireEvent.click(screen.getByRole("button", { name: "Speak to room" }));
+
+    expect(screen.queryByText(/Listening/i)).not.toBeInTheDocument();
+  });
+
+  it("tolerates agents whose metadata cannot be stringified", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    vi.mocked(useAgents).mockReturnValue({
+      data: {
+        agents: [
+          {
+            ...mockAgents[0],
+            metadata: circular,
+          },
+        ],
+      },
+      isLoading: false,
+    } as ReturnType<typeof useAgents>);
+
+    render(<AgentEngagementConsole />);
+    expect(screen.getAllByText("Claude Sonnet Engineer").length).toBeGreaterThan(0);
+  });
+
+  it("parses malformed JSON chat error payloads safely", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response("{not-json", { status: 503 }),
+    );
+
+    render(<AgentEngagementConsole />);
+    fireEvent.change(screen.getByLabelText("Direct message"), { target: { value: "ping" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Chat unavailable: \{not-json/)).toBeInTheDocument();
+    });
+  });
+
   it("stops an active voice capture session when Speak is clicked again", () => {
     const stop = vi.fn();
     class MockRecognition {

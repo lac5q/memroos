@@ -595,6 +595,76 @@ describe("MEMLIFE-02 real erasure store adapters", () => {
     expect(report.storeOutcomes).toEqual([]);
   });
 
+  it("reports graph unavailable when Neo4j HTTP body includes errors despite ok status", async () => {
+    const database = freshDb();
+    const prevPassword = process.env.NEO4J_PASSWORD;
+    const prevFetch = global.fetch;
+    process.env.NEO4J_PASSWORD = "secret";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ errors: [{ code: "Neo.ClientError.Statement.SyntaxError" }] }),
+    }) as typeof fetch;
+    try {
+      const identity = buildCanonicalIdentity("neo4j-errors", "graph", "ingress", "graph", {
+        tenantId: "default-tenant",
+      });
+      const report = await coordinateErasure(database, identity, {
+        tenantId: "default-tenant",
+        actorId: "tester",
+        scope: { tenantId: "default-tenant" },
+      });
+      const graph = report.storeOutcomes.find((o) => o.storeId === "graph");
+      expect(graph?.status).toBe("unavailable");
+      expect(graph?.reason).toMatch(/neo4j_graph_backend_unavailable/);
+    } finally {
+      if (prevPassword === undefined) delete process.env.NEO4J_PASSWORD;
+      else process.env.NEO4J_PASSWORD = prevPassword;
+      global.fetch = prevFetch;
+    }
+  });
+
+  it("invalidates space_cache_state rows when cache store is targeted", async () => {
+    const database = freshDb();
+    database.prepare(`INSERT INTO spaces(id, tenant_id, name) VALUES ('space-cache', 'default-tenant', 'cache-space')`).run();
+    const identity = buildCanonicalIdentity("cache target", "message", "ingress", "cache", {
+      tenantId: "default-tenant",
+    });
+    database
+      .prepare(
+        `INSERT INTO space_cache_state(space_id, resource_id, last_fetched, cached_size, retrieval_count)
+         VALUES ('space-cache', ?, '2026-01-01T00:00:00Z', 128, 3)`
+      )
+      .run(identity.id);
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    const cache = report.storeOutcomes.find((o) => o.storeId === "cache");
+    expect(cache?.status).toBe("purged");
+    const row = database
+      .prepare(`SELECT invalidated_at, retrieval_count FROM space_cache_state WHERE resource_id = ?`)
+      .get(identity.id) as { invalidated_at: string | null; retrieval_count: number };
+    expect(row.invalidated_at).toBeTruthy();
+    expect(row.retrieval_count).toBe(0);
+  });
+
+  it("context adapter reports unavailable when agent_handoff_packs is missing but context is linked", async () => {
+    const database = freshDb();
+    database.exec("DROP TABLE IF EXISTS agent_handoff_packs");
+    const identity = buildCanonicalIdentity("ctx missing table", "message", "ingress", "context", {
+      tenantId: "default-tenant",
+    });
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    const context = report.storeOutcomes.find((o) => o.storeId === "context");
+    expect(context?.status).toBe("unavailable");
+    expect(context?.reason).toMatch(/agent_handoff_packs_missing/);
+  });
+
   it("reports neo4j unavailable when the HTTP backend errors", async () => {
     const database = freshDb();
     const prevPassword = process.env.NEO4J_PASSWORD;
@@ -663,6 +733,127 @@ describe("MEMLIFE-02 real erasure store adapters", () => {
     const candidates = report.storeOutcomes.find((o) => o.storeId === "candidates");
     expect(candidates?.status).toBe("unavailable");
     expect(candidates?.reason).toMatch(/candidate_tables_missing/);
+  });
+
+  it("reports message store unavailable when messages table is missing but message is linked", async () => {
+    const database = freshDb();
+    database.exec("DROP TABLE IF EXISTS messages");
+    const identity = buildCanonicalIdentity("ghost table", "message", "ingress", "message", {
+      tenantId: "default-tenant",
+    });
+    identity.derivatives = [
+      {
+        storeId: "message",
+        sourceHash: identity.canonicalHash,
+        provenance: "test",
+        metadata: { message_id: 1 },
+      },
+    ];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    const message = report.storeOutcomes.find((o) => o.storeId === "message");
+    expect(message?.status).toBe("unavailable");
+    expect(message?.reason).toMatch(/messages_table_missing/);
+  });
+
+  it("maps skipped_retained embedding removals to tombstoned store outcomes", async () => {
+    const database = freshDb();
+    const identity = buildCanonicalIdentity("retained embed", "message", "ingress", "vector", {
+      tenantId: "default-tenant",
+    });
+    const now = "2026-01-01T00:00:00Z";
+    database
+      .prepare(
+        `INSERT INTO memory_embedding_provenance
+         (id, tenant_id, canonical_id, store_id, adapter_kind, source_hash, model_id, model_version,
+          dimensionality, provenance, lifecycle_state, removability, metadata_json, created_at, updated_at)
+         VALUES (?, 'default-tenant', ?, 'cache', 'cache', ?, 'm1', '1.0', 0, 'p', 'active', 'retained', '{}', ?, ?)`
+      )
+      .run("emb-retained-1", identity.id, identity.canonicalHash, now, now);
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    const cache = report.storeOutcomes.find((o) => o.storeId === "cache");
+    expect(cache?.status).toBe("tombstoned");
+    expect(cache?.reason).toMatch(/retained/);
+  });
+
+  it("reports neo4j unavailable when HTTP response is not ok", async () => {
+    const database = freshDb();
+    const prevPassword = process.env.NEO4J_PASSWORD;
+    const prevFetch = global.fetch;
+    process.env.NEO4J_PASSWORD = "secret";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    }) as typeof fetch;
+    try {
+      const identity = buildCanonicalIdentity("neo4j-http-fail", "graph", "ingress", "graph", {
+        tenantId: "default-tenant",
+      });
+      const report = await coordinateErasure(database, identity, {
+        tenantId: "default-tenant",
+        actorId: "tester",
+        scope: { tenantId: "default-tenant" },
+      });
+      const graph = report.storeOutcomes.find((o) => o.storeId === "graph");
+      expect(graph?.status).toBe("unavailable");
+      expect(graph?.reason).toMatch(/neo4j_graph_backend_unavailable/);
+    } finally {
+      if (prevPassword === undefined) delete process.env.NEO4J_PASSWORD;
+      else process.env.NEO4J_PASSWORD = prevPassword;
+      global.fetch = prevFetch;
+    }
+  });
+
+  it("redacts platform rows matched via platform_message_memory message_row_id", async () => {
+    const database = freshDb();
+    const messageId = Number(
+      database
+        .prepare(
+          `INSERT INTO messages(session_id, project, agent_id, role, content, timestamp, visibility, policy)
+           VALUES (?, ?, ?, ?, ?, ?, 'internal', 'indexable')`
+        )
+        .run("sess-pmm-row", "proj", "agent", "user", "platform row match", "2026-01-01T00:00:00Z")
+        .lastInsertRowid
+    );
+    const identity = buildCanonicalIdentity("platform row match", "message", "ingress", "platform", {
+      tenantId: "default-tenant",
+    });
+    database
+      .prepare(
+        `INSERT INTO platform_message_memory
+         (id, dedupe_key, provider, workspace_id, channel_id, thread_id, provider_message_id,
+          author_id, author_name, content, content_hash, message_timestamp, permalink, message_row_id,
+          metadata, created_at, updated_at)
+         VALUES (?, ?, 'slack', 'w', 'c', NULL, 'pm1', 'a', 'A', 'platform row match', ?, '2026-01-01T00:00:00Z',
+                 NULL, ?, '{}', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')`
+      )
+      .run("pmm-row-1", "dedupe-row-1", identity.canonicalHash, messageId);
+    identity.derivatives = [
+      {
+        storeId: "platform",
+        sourceHash: identity.canonicalHash,
+        provenance: "test",
+        metadata: { message_id: messageId },
+      },
+    ];
+    const report = await coordinateErasure(database, identity, {
+      tenantId: "default-tenant",
+      actorId: "tester",
+      scope: { tenantId: "default-tenant" },
+    });
+    expect(report.storeOutcomes.find((o) => o.storeId === "platform")?.status).toBe("tombstoned");
+    const row = database
+      .prepare("SELECT content FROM platform_message_memory WHERE id = ?")
+      .get("pmm-row-1") as { content: string };
+    expect(row.content).toBe("[erased]");
   });
 
   it("marks adapter failures as failed overall status", async () => {

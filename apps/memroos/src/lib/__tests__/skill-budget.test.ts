@@ -60,6 +60,19 @@ describe("summarizeSkillBudget", () => {
     );
   });
 
+  it("sorts duplicate skill names lexicographically when multiple names collide", () => {
+    const report = summarizeSkillBudget(
+      [
+        entry("zebra", "z", "src-a"),
+        entry("zebra", "z dup", "src-b"),
+        entry("alpha", "a", "src-a"),
+        entry("alpha", "a dup", "src-b"),
+      ],
+      500
+    );
+    expect(report.duplicateSkills).toEqual(["alpha", "zebra"]);
+  });
+
   it("flags over-budget catalogs with actionable recommendations", () => {
     const entries = Array.from({ length: 90 }, (_, index) =>
       entry(

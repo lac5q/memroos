@@ -17,6 +17,17 @@ status: complete
     expect(result.missing).toContain("ui_representation");
   });
 
+  it("accepts follow_up_required with a note", () => {
+    const result = validatePhaseUiRepresentation(`# Phase 100 Summary
+
+status: complete
+ui_representation: follow_up_required
+ui_representation_note: Follow-up dashboard ships in phase 101.
+`);
+    expect(result.ok).toBe(true);
+    expect(result.kind).toBe("follow_up_required");
+  });
+
   it("accepts visible UI, existing UI provenance, API-only, and follow-up decisions", () => {
     const result = validatePhaseUiRepresentation(`# Phase 99 Summary
 

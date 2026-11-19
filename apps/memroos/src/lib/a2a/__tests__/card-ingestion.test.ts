@@ -227,4 +227,30 @@ describe("A2A card ingestion", () => {
     expect(() => validateA2aAgentCard({ ...ADK_CARD, url: "not-a-url" })).toThrow(/valid URL/);
     expect(() => validateA2aAgentCard({ ...ADK_CARD, version: "" })).toThrow(/version/i);
   });
+
+  it("preserves JSON-RPC preferredTransport when supplied", async () => {
+    const { validateA2aAgentCard } = await loadIngestion();
+    const card = validateA2aAgentCard({
+      ...ADK_CARD,
+      preferredTransport: "JSON-RPC",
+    });
+    expect(card.preferredTransport).toBe("JSON-RPC");
+  });
+
+  it("fetchA2aAgentCard rejects disallowed card URLs before networking", async () => {
+    const { fetchA2aAgentCard } = await loadIngestion();
+    await expect(fetchA2aAgentCard("http://169.254.169.254/card.json")).rejects.toMatchObject({
+      message: "A2A agent card URL is not allowed",
+    });
+  });
+
+  it("allows localhost cards when private network cards are explicitly enabled", async () => {
+    const { isAllowedAgentCardUrl } = await loadIngestion();
+    expect(
+      isAllowedAgentCardUrl("http://localhost:8001/.well-known/agent-card.json", {
+        allowPrivateNetworkCards: true,
+        remoteCardTimeoutMs: 5000,
+      })
+    ).toBe(true);
+  });
 });
