@@ -114,6 +114,29 @@ describe("Hermes memory client v2", () => {
     );
   });
 
+  it("filters search results below the semantic threshold", () => {
+    const hermesRoot = root();
+    addMemory(hermesRoot, { content: "Completely unrelated finance memo about quarterly taxes." });
+    const results = searchMemories(hermesRoot, "kubernetes deployment rollout", { limit: 5, threshold: 0.9 });
+    expect(results).toHaveLength(0);
+  });
+
+  it("supports memoryTool remove and replace actions", () => {
+    const hermesRoot = root();
+    const created = addMemory(hermesRoot, { content: "Original deployment checklist." });
+    const replaced = memoryTool(hermesRoot, {
+      action: "replace",
+      id: created.id,
+      content: "Updated deployment checklist.",
+    });
+    expect(replaced.ok).toBe(true);
+    expect(searchMemories(hermesRoot, "Updated deployment")[0]?.content).toContain("Updated");
+
+    const removed = memoryTool(hermesRoot, { action: "remove", id: created.id });
+    expect(removed.ok).toBe(true);
+    expect(searchMemories(hermesRoot, "Updated deployment")).toHaveLength(0);
+  });
+
   it("archives expired memories and keeps backward-compatible memory tool calls", () => {
     const hermesRoot = root();
     const expired = addMemory(hermesRoot, {
