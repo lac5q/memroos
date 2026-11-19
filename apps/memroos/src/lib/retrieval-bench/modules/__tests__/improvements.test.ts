@@ -330,6 +330,20 @@ describe("entity extraction (VAL-RETR-015)", () => {
     expect(r.ok).toBe(false);
   });
 
+  it("returns typed failure for non-string extraction input", () => {
+    const r = extractEntities(null as unknown as string, { version: "v1", seed: 0 });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("extraction_text_missing");
+    expect(r.entities).toEqual([]);
+  });
+
+  it("extracts numeric calendar dates and rejects sentence-initial stopwords", () => {
+    const dated = extractEntities("Ship on 04/15/2026 after review.", { version: "v1", seed: 0 });
+    expect(dated.ok).toBe(true);
+    expect(dated.entities.some((e) => e.kind === "date")).toBe(true);
+    expect(dated.entities.some((e) => e.surface === "After")).toBe(false);
+  });
+
   it("decideEntityMerge dedupes by entity id within a scope", () => {
     const a = extractEntities("Qdrant", { version: "v1", seed: 0 });
     const b = extractEntities("Qdrant again", { version: "v1", seed: 0 });
@@ -455,6 +469,53 @@ describe("rerank (VAL-RETR-017)", () => {
     const r = await rerankCandidates({ items, question: "x", cutoff: 3, strategy: "disabled" });
     expect(r.receipt.strategy).toBe("disabled");
     expect(r.items.length).toBe(1);
+  });
+
+  it("marks provider rerank timeout and failure with typed receipts", async () => {
+    const items: RetrievedItem[] = [
+      { id: "a", score: 1, text: "x", tier: "lexical", source: "corpus", authorizationResult: "allowed", whyEntered: "ok", rankPosition: 1 },
+    ];
+    const timeout = await rerankCandidates({
+      items,
+      question: "x",
+      cutoff: 1,
+      strategy: "provider",
+      providerHook: async () => {
+        throw new Error("provider timeout exceeded");
+      },
+    });
+    expect(timeout.receipt.status).toBe("provider_timeout");
+
+    const failed = await rerankCandidates({
+      items,
+      question: "x",
+      cutoff: 1,
+      strategy: "provider",
+      providerHook: async () => {
+        throw new Error("upstream failed");
+      },
+    });
+    expect(failed.receipt.status).toBe("provider_failed");
+  });
+
+  it("accepts successful provider rerank hook results", async () => {
+    const items: RetrievedItem[] = [
+      { id: "a", score: 1, text: "alpha", tier: "lexical", source: "corpus", authorizationResult: "allowed", whyEntered: "ok", rankPosition: 1 },
+      { id: "b", score: 0.5, text: "beta", tier: "lexical", source: "corpus", authorizationResult: "allowed", whyEntered: "ok", rankPosition: 2 },
+    ];
+    const r = await rerankCandidates({
+      items,
+      question: "alpha",
+      cutoff: 1,
+      strategy: "provider",
+      providerHook: async ({ items: hookItems }) => ({
+        items: [...hookItems].reverse(),
+        modelVersion: "test-rerank-v2",
+      }),
+    });
+    expect(r.receipt.status).toBe("ok");
+    expect(r.receipt.modelVersion).toBe("test-rerank-v2");
+    expect(r.items[0]?.id).toBe("b");
   });
 });
 

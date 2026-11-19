@@ -86,6 +86,20 @@ describe("wiki-vault", () => {
     expect(wikiRootExists(wikiRoot)).toBe(true);
   });
 
+  it("ignores unreadable pages while searching", () => {
+    const kb = makeVault();
+    const wikiRoot = getWikiRoot({ knowledgeBasePath: kb });
+    const unreadable = path.join(wikiRoot, "memroos-digest", "locked.md");
+    fs.writeFileSync(unreadable, "# Locked\nsecret phrase\n", "utf8");
+    fs.chmodSync(unreadable, 0o000);
+    try {
+      expect(readWikiPage(wikiRoot, "memroos-digest/locked.md")).toBeNull();
+      expect(searchWikiPages(wikiRoot, "secret phrase")).toEqual([]);
+    } finally {
+      fs.chmodSync(unreadable, 0o644);
+    }
+  });
+
   it("loads wiki graph and degrades when missing", () => {
     const kb = makeVault();
     const graph = loadWikiGraph({ knowledgeBasePath: kb });
@@ -141,6 +155,57 @@ describe("wiki-digest", () => {
     expect(fs.existsSync(path.join(kb, "llm-wiki", "wiki", "memroos-digest", `${key}.md`))).toBe(
       false
     );
+  });
+
+  it("creates wiki index and log files on first non-dry-run digest", async () => {
+    const kb = makeVault();
+    const wikiRoot = path.join(kb, "llm-wiki", "wiki");
+    fs.rmSync(path.join(wikiRoot, "index.md"), { force: true });
+    fs.rmSync(path.join(wikiRoot, "log.md"), { force: true });
+
+    await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: false,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      fetchMemories: async () => [
+        {
+          id: "m-index",
+          content: "First digest creates index and log scaffolding.",
+          createdAt: "2026-07-18T11:45:00.000Z",
+        },
+      ],
+      log: () => undefined,
+    });
+
+    expect(fs.existsSync(path.join(wikiRoot, "index.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(wikiRoot, "index.md"), "utf8")).toContain("# Wiki Index");
+    expect(fs.existsSync(path.join(wikiRoot, "log.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(wikiRoot, "log.md"), "utf8")).toContain("# Wiki Log");
+  });
+
+  it("merges graph nodes when the existing graph file is corrupt", async () => {
+    const kb = makeVault();
+    const graphPath = path.join(kb, "llm-wiki", "wiki", "graph", "knowledge-graph.json");
+    fs.mkdirSync(path.dirname(graphPath), { recursive: true });
+    fs.writeFileSync(graphPath, "{broken-json", "utf8");
+
+    const summary = await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: false,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      fetchMemories: async () => [
+        {
+          id: "m-graph",
+          content: "Graph merge should recover from invalid JSON on disk.",
+          createdAt: "2026-07-18T11:50:00.000Z",
+        },
+      ],
+      log: () => undefined,
+    });
+
+    expect(summary.written).toBe(1);
+    const graph = JSON.parse(fs.readFileSync(graphPath, "utf8")) as { nodes: Array<{ id: string }> };
+    expect(graph.nodes.some((n) => n.id.includes("memroos-digest"))).toBe(true);
   });
 
   it("writes pages, updates watermark, and refreshes graph", async () => {
@@ -339,6 +404,81 @@ describe("wiki-digest", () => {
     const bad = loadWikiGraph({ knowledgeBasePath: kb });
     expect(bad.exists).toBe(false);
     expect(bad.reason).toBeTruthy();
+  });
+
+  it("parses mem0 response wrappers and uses episodic fallback when mem0 is down", async () => {
+    const kb = makeVault();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          results: [{ id: "mem0-1", data: "Wrapped mem0 body", created_at: "2026-07-18T11:10:00.000Z" }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({}),
+      });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const mem0Summary = await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: true,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      log: () => undefined,
+    });
+    expect(mem0Summary.considered).toBe(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/memory/all?agent_id="),
+      expect.objectContaining({ headers: { accept: "application/json" } }),
+    );
+
+    const db = new Database(":memory:");
+    initSchema(db);
+    db.prepare(
+      "INSERT INTO messages(session_id, project, agent_id, role, content, timestamp) VALUES (?,?,?,?,?,?)",
+    ).run("sess", "alpha", "luis", "user", "Episodic fallback note", "2026-07-18T11:20:00.000Z");
+
+    const fallbackSummary = await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: true,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      db,
+      log: () => undefined,
+    });
+    expect(fallbackSummary.considered).toBeGreaterThanOrEqual(1);
+    db.close();
+    vi.unstubAllGlobals();
+  });
+
+  it("appends to existing wiki index and log files on subsequent digests", async () => {
+    const kb = makeVault();
+    const wikiRoot = path.join(kb, "llm-wiki", "wiki");
+    fs.mkdirSync(wikiRoot, { recursive: true });
+    fs.writeFileSync(path.join(wikiRoot, "index.md"), "# Wiki Index\n");
+    fs.writeFileSync(path.join(wikiRoot, "log.md"), "# Wiki Log\n");
+
+    await runWikiDigest({
+      knowledgeBasePath: kb,
+      dryRun: false,
+      now: new Date("2026-07-18T12:00:00.000Z"),
+      fetchMemories: async () => [
+        {
+          id: "m-append",
+          content: "Second digest should append to existing index and log files.",
+          createdAt: "2026-07-18T11:55:00.000Z",
+        },
+      ],
+      log: () => undefined,
+    });
+
+    const index = fs.readFileSync(path.join(wikiRoot, "index.md"), "utf8");
+    const log = fs.readFileSync(path.join(wikiRoot, "log.md"), "utf8");
+    expect(index).toContain("MemRoOS digest");
+    expect(log).toContain("wiki-digest");
   });
 
   it("filters path-traversal graph nodes and accepts from/to edges", () => {
