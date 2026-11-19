@@ -19,6 +19,13 @@ describe("NodeDetailRail", () => {
     expect(screen.getByRole("link", { name: /open page/i })).toHaveAttribute("href", "/");
   });
 
+  it("routes agent nodes to dispatch and renders live labels", () => {
+    render(<NodeDetailRail nodeId="agent:ceo" node={{ label: "CEO Agent", sub: "Executive orchestrator" }} />);
+    expect(screen.getByRole("link", { name: /open page/i })).toHaveAttribute("href", "/dispatch");
+    expect(screen.getByText("CEO Agent")).toBeInTheDocument();
+    expect(screen.getByText("Executive orchestrator")).toBeInTheDocument();
+  });
+
   it("does not render a current-page Open page link for source nodes already shown on the map", () => {
     // Source ids are namespaced `src:<provider>` by the topology builder.
     render(<NodeDetailRail nodeId="src:slack" />);

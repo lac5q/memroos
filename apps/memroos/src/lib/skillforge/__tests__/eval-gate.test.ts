@@ -53,6 +53,13 @@ describe("SkillForge Eval Gate", () => {
     `);
   });
 
+  it("creates empty splits for zero task samples", () => {
+    const { train, validation, heldOut } = createSplits(db, "skill-empty", []);
+    expect(train.taskSamples).toEqual([]);
+    expect(validation.taskSamples).toEqual([]);
+    expect(heldOut.taskSamples).toEqual([]);
+  });
+
   it("creates disjoint splits", () => {
     const samples = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
     const { train, validation, heldOut } = createSplits(db, "skill-1", samples);

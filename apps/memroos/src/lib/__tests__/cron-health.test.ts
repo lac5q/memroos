@@ -217,6 +217,17 @@ describe("recordCronHealthRun", () => {
     expect(job?.status).toBe("paused");
   });
 
+  it("treats corrupt metadata_json as empty when merging run metadata", () => {
+    const db = freshDb();
+    upsertCronHealthJob(db, sampleJob);
+    db.prepare("UPDATE cron_health_jobs SET metadata_json = ? WHERE id = ?").run("{not-json", "test-job");
+    const job = recordCronHealthRun(db, "test-job", {
+      success: true,
+      metadata: { recovered: true },
+    });
+    expect(job?.metadata).toEqual({ recovered: true });
+  });
+
   it("merges new metadata with existing metadata_json", () => {
     const db = freshDb();
     upsertCronHealthJob(db, { ...sampleJob, metadata: { team: "platform", version: 1 } });
