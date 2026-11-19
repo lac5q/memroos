@@ -9,6 +9,7 @@ import {
   decryptVaultBody,
   encryptVaultBody,
   rewrapVaultEnvelope,
+  shouldEncryptVaultLabel,
 } from "../envelope";
 
 let tmpDir: string;
@@ -32,6 +33,27 @@ describe("vault envelope encryption", () => {
     expect(envelope.keyId).toBe("local-v1");
     expect(envelope.ciphertext).not.toContain("sensitive artifact body");
     expect(decrypted.toString("utf8")).toBe("sensitive artifact body");
+  });
+
+  it("requires encryption for sensitive vault labels", () => {
+    expect(
+      shouldEncryptVaultLabel({
+        visibility: "internal",
+        policy: "default",
+        sensitivity: "pii",
+      })
+    ).toBe(true);
+    expect(
+      shouldEncryptVaultLabel({ visibility: "private", policy: "default" })
+    ).toBe(true);
+  });
+
+  it("rejects unsupported vault envelope versions", () => {
+    const provider = new LocalFileKeyProvider(path.join(tmpDir, "vault.key"));
+    const envelope = encryptVaultBody(Buffer.from("x", "utf8"), provider);
+    expect(() =>
+      decryptVaultBody({ ...envelope, version: 2 as 1 }, provider)
+    ).toThrow(/Unsupported vault encryption envelope/);
   });
 
   it("rewraps a data key after rotating the key-encryption key", () => {

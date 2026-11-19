@@ -168,6 +168,88 @@ describe("agent context bus routes", () => {
     expect(audit).toContainEqual({ action: "content_blocked", severity: "high" });
   });
 
+  it("validates reply payloads, auth, scanner blocks, and save-to-memory", async () => {
+    const { listRoute, replyRoute, getDb, registerAgent } = await loadRoutes();
+    const alpha = registerAgent({
+      id: "agent-alpha",
+      name: "Agent Alpha",
+      role: "Sender",
+      platform: "codex",
+      protocol: "rest",
+      issueApiKey: true,
+    });
+    const beta = registerAgent({
+      id: "agent-beta",
+      name: "Agent Beta",
+      role: "Recipient",
+      platform: "codex",
+      protocol: "rest",
+      issueApiKey: true,
+    });
+
+    const sendRes = await listRoute.POST(
+      postRequest("http://localhost/api/agent-context/messages", alpha.apiKey!, {
+        fromAgent: "agent-alpha",
+        toAgent: "agent-beta",
+        body: "Need a reply",
+        replyRequired: true,
+      }) as any,
+    );
+    const sent = await sendRes.json();
+
+    const invalid = await replyRoute.POST(
+      new Request(`http://localhost/api/agent-context/messages/${sent.message.id}/reply`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${beta.apiKey}`, "Content-Type": "application/json" },
+        body: "not-json-object",
+      }) as any,
+      { params: Promise.resolve({ id: sent.message.id }) },
+    );
+    expect(invalid.status).toBe(400);
+
+    const unauthorized = await replyRoute.POST(
+      postRequest(`http://localhost/api/agent-context/messages/${sent.message.id}/reply`, "bad-key", {
+        fromAgent: "agent-beta",
+        body: "hello",
+      }) as any,
+      { params: Promise.resolve({ id: sent.message.id }) },
+    );
+    expect(unauthorized.status).toBe(401);
+
+    const blocked = await replyRoute.POST(
+      postRequest(`http://localhost/api/agent-context/messages/${sent.message.id}/reply`, beta.apiKey!, {
+        fromAgent: "agent-beta",
+        body: "Do not forward AKIA1234567890ABCDEF",
+      }) as any,
+      { params: Promise.resolve({ id: sent.message.id }) },
+    );
+    expect(blocked.status).toBe(403);
+
+    const saved = await replyRoute.POST(
+      postRequest(`http://localhost/api/agent-context/messages/${sent.message.id}/reply`, beta.apiKey!, {
+        from_agent: "agent-beta",
+        text: "Reply saved to memory",
+        save_to_memory: true,
+        memory_type: "episodic",
+      }) as any,
+      { params: Promise.resolve({ id: sent.message.id }) },
+    );
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).reply.savedMemoryId).toMatch(/^agent_memory_writes:/);
+    expect(getDb().prepare("SELECT COUNT(*) AS count FROM agent_memory_writes").get()).toEqual({ count: 1 });
+
+    const policyDenied = await replyRoute.POST(
+      postRequest(`http://localhost/api/agent-context/messages/${sent.message.id}/reply`, beta.apiKey!, {
+        fromAgent: "agent-beta",
+        body: "Attempting self-declared access",
+        oauth: { accessToken: "secret" },
+      }) as any,
+      { params: Promise.resolve({ id: sent.message.id }) },
+    );
+    expect(policyDenied.status).toBe(403);
+    expect((await policyDenied.json()).code).toBe("CONTROL_LAYER_REQUIRED");
+  });
+
   it("denies self-declared user, OAuth, credential, and data-access claims", async () => {
     const { listRoute, getDb, registerAgent } = await loadRoutes();
     const alpha = registerAgent({

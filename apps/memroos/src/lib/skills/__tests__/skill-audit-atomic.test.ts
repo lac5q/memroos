@@ -207,4 +207,31 @@ describe("VAL-SKILL-038 audit-atomic mutations", () => {
       })
     ).toThrow(AuditAtomicFailure);
   });
+
+  it("throws when eventType or entity fields are missing", async () => {
+    const { commitAuditAtomic, AuditAtomicFailure } = await import(
+      "@/lib/skills/skill-audit-atomic"
+    );
+    expect(() =>
+      commitAuditAtomic(db, {
+        actor: "operator",
+        eventType: " ",
+        entityType: "skill",
+        entityId: "skill:x",
+        metadata: {},
+        body: () => "ok",
+      })
+    ).toThrow(AuditAtomicFailure);
+
+    expect(() =>
+      commitAuditAtomic(db, {
+        actor: "operator",
+        eventType: "skill.test.noentity",
+        entityType: "",
+        entityId: "skill:x",
+        metadata: {},
+        body: () => "ok",
+      })
+    ).toThrow(AuditAtomicFailure);
+  });
 });
