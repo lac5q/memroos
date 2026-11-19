@@ -294,4 +294,28 @@ describe("efficiency telemetry event foundation", () => {
     );
     expect(merged.models.find((m) => m.id === "MiniMax-M3")?.requests).toBe(3);
   });
+
+  it("throws when stored event payload JSON is corrupt", () => {
+    recordEfficiencyEvent(db, {
+      eventType: "source_read",
+      taskId: "task-bad",
+      payload: { sourceId: "a", sourceHash: "h" },
+    });
+    db.prepare("UPDATE efficiency_events SET payload = ? WHERE task_id = ?").run("not-json", "task-bad");
+    expect(() => listEfficiencyEvents(db, { taskId: "task-bad", limit: 5 })).toThrow(
+      /Invalid efficiency event payload JSON/
+    );
+  });
+
+  it("skips corrupt token_ledger payloads and zero-token rows when aggregating", () => {
+    recordEfficiencyEvent(db, {
+      eventType: "token_ledger",
+      payload: { modelId: "empty-model", rawContextTokens: 0, cachedTokens: 0, totalTokens: 0 },
+    });
+    db.prepare(
+      `INSERT INTO efficiency_events (tenant_id, event_type, task_id, agent_id, payload, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run("default-tenant", "token_ledger", "t", "a", "{not-json", new Date().toISOString());
+    expect(aggregateEfficiencyTokenLedger(db).models).toEqual([]);
+  });
 });

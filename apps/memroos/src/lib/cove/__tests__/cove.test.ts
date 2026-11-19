@@ -54,6 +54,16 @@ describe("CoVe pipeline", () => {
     expect(result.trace.factChecks[0].answer).toContain("9M");
   });
 
+  it("returns draft unchanged when CoVe is disabled", async () => {
+    const result = await runCovePipeline({
+      input: "question",
+      draft: "draft answer",
+      config: { enabled: false, maxVerificationQuestions: 2, parallelVerification: false },
+    });
+    expect(result.revisedAnswer).toBe("draft answer");
+    expect(result.trace.questions).toEqual([]);
+  });
+
   it("adapts OpenAI-compatible local endpoints without model-specific branches", async () => {
     const requests: unknown[] = [];
     const client = createOpenAICompatibleCoveClient({
@@ -72,6 +82,27 @@ describe("CoVe pipeline", () => {
         messages: [{ role: "user", content: "hello" }],
       }),
     ]);
+  });
+
+  it("throws when the OpenAI-compatible endpoint returns a non-OK status", async () => {
+    const client = createOpenAICompatibleCoveClient({
+      endpoint: "http://localhost:11434/v1",
+      model: "hermes3",
+      fetchImpl: async () => {
+        return {
+          ok: false,
+          status: 503,
+          json: async () => ({}),
+        } as unknown as Response;
+      },
+    });
+    let message = "no throw";
+    try {
+      await client("hello");
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+    expect(message).toContain("503");
   });
 });
 

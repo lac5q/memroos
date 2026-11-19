@@ -1,6 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const authorizeRegistryWrite = vi.hoisted(() => vi.fn(() => true));
+
+vi.mock("@/lib/operator-auth", () => ({
+  authorizeRegistryWrite: (...args: unknown[]) => authorizeRegistryWrite(...args),
+  registryWriteUnauthorizedResponse: () => Response.json({ ok: false, error: "forbidden" }, { status: 403 }),
+}));
+
 vi.mock("@/lib/memory-recall-evals", () => ({
   getLatestMemoryEvalRun: vi.fn(),
   runMemoryRecallEvalSuite: vi.fn(),
@@ -17,6 +24,22 @@ async function loadRoutes() {
 describe("memory eval API routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authorizeRegistryWrite.mockReset();
+    authorizeRegistryWrite.mockReturnValue(true);
+  });
+
+  it("returns 403 for latest when registry write is unauthorized", async () => {
+    authorizeRegistryWrite.mockReturnValueOnce(false);
+    const { latestRoute } = await loadRoutes();
+    const response = await latestRoute.GET(new Request("http://localhost/api/memory/evals/latest"));
+    expect(response.status).toBe(403);
+  });
+
+  it("returns 403 for run when registry write is unauthorized", async () => {
+    authorizeRegistryWrite.mockReturnValueOnce(false);
+    const { runRoute } = await loadRoutes();
+    const response = await runRoute.POST(new Request("http://localhost/api/memory/evals/run", { method: "POST" }));
+    expect(response.status).toBe(403);
   });
 
   it("returns the latest persisted eval run", async () => {
