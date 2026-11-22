@@ -1,0 +1,130 @@
+MemroOS Source Available License 1.0
+Copyright (c) 2026 Luis Calderon
+
+1. Scope and acceptance
+
+This license applies only to software that its copyright holder expressly
+distributes with this license as the governing license ("Software"). Luis
+Calderon is the licensor ("Licensor"). By exercising the permissions below,
+you accept this license's conditions. This is a custom source-available
+license, not the PolyForm Small Business, Elastic, MIT, or Apache license.
+
+A separate written agreement with Licensor may authorize additional uses.
+A notice identifying a component as third-party material under another
+license takes precedence for that component. Licensor grants only rights
+Licensor has authority to grant.
+
+2. Eligible internal use
+
+Subject to every condition in this license, Licensor grants you a worldwide,
+nonexclusive, royalty-free copyright license to copy, run, inspect, and modify
+the Software solely for the internal operations of a Qualifying Company for
+which you work. Employees and contractors may exercise these permissions on
+that company's behalf and under these same conditions.
+
+A "Qualifying Company" has both:
+(a) fewer than 100 employees and independent contractors in total; and
+(b) total revenue in its previous tax year below US$1,000,000 measured in 2019
+dollars, adjusted for inflation using the U.S. Bureau of Labor Statistics
+CPI-U, U.S. city average, all items, not seasonally adjusted, base 1982-1984=100.
+
+For these tests, a company includes the business or organization for which you
+work and every entity that controls it, is controlled by it, or is under common
+control with it. Control means ownership of substantially all assets or power
+to direct management and policies, directly or indirectly.
+
+Internal operations may include using the Software to produce work products
+for customers. That permission does not extend to giving customers or other
+third parties access to the Software's functionality as described in section 3.
+Use by or for a company that does not meet both thresholds requires a separate
+written commercial license from Licensor.
+
+3. Hosted and managed services
+
+Without a separate written commercial license from Licensor, you may not use,
+copy, modify, distribute, or make the Software available to provide third
+parties a hosted or managed service that gives them access to a substantial
+part of the Software's memory storage, retrieval, search, knowledge-management,
+or agent-memory functionality.
+
+This restriction applies whether the service is paid or free, whether the
+Software is modified or unmodified, and whether access is supplied through a
+user interface, API, integration, reseller, or white-label offering. Rebranding,
+wrapping, or combining the Software with other software does not remove this
+restriction. A Qualifying Company is also subject to this restriction.
+
+Employees and contractors accessing a deployment solely for the eligible
+company's own internal operations are not third-party service customers for
+this section. A contractor's assistance installing or maintaining that
+deployment does not authorize the contractor to offer the Software's
+functionality to customers as its own hosted or managed service.
+
+This license does not restrict independently developed software that does not
+use or incorporate the Software, and does not grant exclusive rights in ideas,
+protocols, or functionality as such.
+
+4. Redistribution and notices
+
+You may redistribute unmodified or modified copies only under this same
+license, with a complete copy of these terms and all applicable copyright,
+attribution, and third-party license notices. Mark your modifications clearly.
+Recipients receive permissions from Licensor under these terms, not an
+additional license from you. Redistribution does not authorize any recipient
+or distributor to undertake a use forbidden by sections 2 or 3.
+
+You may not remove or obscure licensing or copyright notices, or represent a
+restricted copy as available under an unrestricted license. You may not
+circumvent the Software's commercial-license or entitlement controls to obtain
+functionality or usage rights for which you lack permission.
+
+5. Data and trademarks
+
+This license grants no ownership rights in your data to Licensor and imposes
+no additional restriction on exporting data that you are otherwise entitled
+to access. Software licensing does not override another person's data rights.
+
+No right to use Licensor's names, logos, or trademarks is granted beyond
+truthful identification and attribution permitted by applicable law. You must
+not imply that Licensor endorses or operates your modifications or service.
+
+6. Patents
+
+To the extent Licensor can grant them, Licensor grants a nonexclusive patent
+license for claims necessarily infringed by using the Software as supplied,
+solely for uses permitted by this license. This does not cover additional
+infringement caused by your modifications or combinations. If you or your
+company assert that the Software infringes a patent, this patent grant ends.
+
+7. Termination
+
+Permissions terminate if you violate a condition of this license. For your
+first violation, if Licensor gives you written notice and you stop the
+violation and remedy its effects to the extent practicable within 32 days,
+your permissions are reinstated. This cure does not waive claims for the
+violation. Later violations do not receive an automatic right to cure.
+
+After termination you must stop exercising rights granted by this license
+unless Licensor separately authorizes them in writing. Rights in your own
+data and rights independently granted under third-party or earlier licenses
+are not terminated by this provision.
+
+8. Earlier releases and other rights
+
+This license does not replace the terms on copies previously received under
+MIT, PolyForm Small Business, or another license. It does not revoke rights
+already granted for those copies, or relicense third-party components.
+Availability of an earlier version under other terms does not grant rights in
+new material distributed exclusively under this license.
+
+No automatic conversion to a permissive license occurs with the passage of
+time. No rights are granted except as stated here or in a separate written
+agreement. Rights that cannot be restricted by applicable law are unaffected.
+
+9. Disclaimer and limitation of liability
+
+THE SOFTWARE IS PROVIDED AS IS, WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE,
+AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW,
+LICENSOR AND CONTRIBUTORS ARE NOT LIABLE FOR CLAIMS, DAMAGES, OR OTHER
+LIABILITY ARISING FROM THE SOFTWARE OR ITS USE, WHETHER IN CONTRACT, TORT,
+OR OTHERWISE.

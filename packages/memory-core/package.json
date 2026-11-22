@@ -1,0 +1,71 @@
+{
+  "name": "@memroos/memory-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "sideEffects": false,
+  "description": "Deterministic memory policy, scope, ranking, retrieval-query, hashing, and ranking-model identity primitives.",
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "src",
+    "dist",
+    "test",
+    "README.md",
+    "LICENSE",
+    "tsconfig.json",
+    "scripts"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./ranking": {
+      "types": "./dist/ranking.d.ts",
+      "import": "./dist/ranking.js",
+      "default": "./dist/ranking.js"
+    },
+    "./retrieval-query": {
+      "types": "./dist/retrieval-query.d.ts",
+      "import": "./dist/retrieval-query.js",
+      "default": "./dist/retrieval-query.js"
+    },
+    "./hash": {
+      "types": "./dist/hash.d.ts",
+      "import": "./dist/hash.js",
+      "default": "./dist/hash.js"
+    },
+    "./ranking-model-identity": {
+      "types": "./dist/ranking-model-identity.d.ts",
+      "import": "./dist/ranking-model-identity.js",
+      "default": "./dist/ranking-model-identity.js"
+    },
+    "./memory-policy": {
+      "types": "./dist/memory-policy.d.ts",
+      "import": "./dist/memory-policy.js",
+      "default": "./dist/memory-policy.js"
+    },
+    "./memory-scope": {
+      "types": "./dist/memory-scope.d.ts",
+      "import": "./dist/memory-scope.js",
+      "default": "./dist/memory-scope.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "check:build": "node scripts/build.mjs --check"
+  },
+  "dependencies": {
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.39",
+    "typescript": "5.9.3"
+  }
+}
