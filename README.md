@@ -1,11 +1,11 @@
-# MemroOS core
+# Memroos core
 
-Deterministic building blocks for agent memory, from MemroOS:
+Deterministic building blocks for agent memory, from Memroos:
 
 - **`@memroos/memory-core`**: memory policy and scope checks, a local baseline
   evidence ranker, retrieval-query planning, canonical request hashing, and the
   schema that names which ranking model produced a ranking.
-- **`@memroos/memory-contracts`**: the wire contract for MemroOS's OpenAI memory
+- **`@memroos/memory-contracts`**: the wire contract for Memroos's OpenAI memory
   tools (`get_profile`, `search`, `fetch`, `create_memory`, `update_memory`): their
   scopes, error codes, limits and JSON schemas, with no dependencies.
 
